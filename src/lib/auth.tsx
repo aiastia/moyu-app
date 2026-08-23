@@ -7,6 +7,8 @@ import { DEFAULT_READER_PREFS, type ReaderPrefs } from './theme';
 const KEY_BASE = 'moyu.baseUrl';
 const KEY_TOKEN = 'moyu.token';
 const KEY_USER = 'moyu.user';
+const KEY_REMEMBER = 'moyu.rememberPwd';
+const KEY_PASSWORD = 'moyu.savedPassword';
 
 interface AuthState {
   ready: boolean;
@@ -17,8 +19,9 @@ interface AuthState {
 
 interface AuthContextValue extends AuthState {
   api: Api | null;
-  login: (rawUrl: string, username: string, password: string) => Promise<void>;
-  logout: () => Promise<void>;
+  login: (rawUrl: string, username: string, password: string, remember?: boolean) => Promise<void>;
+  /** keepConfig=true（默认）：只清 token，保留服务器地址/账号/记住的密码——用于 401 过期等场景；显式退出登录用 keepConfig=false 全清 */
+  logout: (opts?: { keepConfig?: boolean }) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -42,20 +45,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     })();
   }, []);
 
-  const login = useCallback(async (rawUrl: string, username: string, password: string) => {
+  const login = useCallback(async (rawUrl: string, username: string, password: string, remember = false) => {
     const base = normalizeBaseUrl(rawUrl);
     const { access_token, user } = await loginRequest(base, username.trim(), password);
-    await AsyncStorage.multiSet([
+    const pairs: [string, string][] = [
       [KEY_BASE, base],
       [KEY_TOKEN, access_token],
       [KEY_USER, JSON.stringify(user)],
-    ]);
+      [KEY_REMEMBER, remember ? '1' : '0'],
+    ];
+    if (remember) pairs.push([KEY_PASSWORD, password]);
+    await AsyncStorage.multiSet(pairs);
+    if (!remember) await AsyncStorage.removeItem(KEY_PASSWORD).catch(() => undefined);
     setState({ ready: true, baseUrl: base, token: access_token, user });
   }, []);
 
-  const logout = useCallback(async () => {
-    await AsyncStorage.multiRemove([KEY_BASE, KEY_TOKEN, KEY_USER]).catch(() => undefined);
-    setState((s) => ({ ...s, baseUrl: null, token: null, user: null }));
+  const logout = useCallback(async (opts?: { keepConfig?: boolean }) => {
+    const keepConfig = opts?.keepConfig !== false;
+    const keys = keepConfig ? [KEY_TOKEN] : [KEY_BASE, KEY_TOKEN, KEY_USER, KEY_REMEMBER, KEY_PASSWORD];
+    await AsyncStorage.multiRemove(keys).catch(() => undefined);
+    setState((s) => (keepConfig ? { ...s, token: null } : { ...s, baseUrl: null, token: null, user: null }));
   }, []);
 
   const api = useMemo(
@@ -75,6 +84,22 @@ export function useAuth(): AuthContextValue {
   const ctx = useContext(AuthContext);
   if (!ctx) throw new Error('useAuth must be used inside AuthProvider');
   return ctx;
+}
+
+/** 登录页预填：读取上次用的服务器地址/账号/记住的密码（401 过期后只需重输或一键登录） */
+export async function loadSavedLoginInfo(): Promise<{ baseUrl: string; username: string; password: string; remember: boolean }> {
+  try {
+    const [[, b], [, u], [, p], [, r]] = await AsyncStorage.multiGet([KEY_BASE, KEY_USER, KEY_PASSWORD, KEY_REMEMBER]);
+    const user = u ? (JSON.parse(u) as LoginUser) : null;
+    return {
+      baseUrl: b ?? '',
+      username: user?.username ?? '',
+      password: p ?? '',
+      remember: r === '1',
+    };
+  } catch {
+    return { baseUrl: '', username: '', password: '', remember: false };
+  }
 }
 
 /** 网络错误转用户友好文案；401 自动登出由调用方处理 */

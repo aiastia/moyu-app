@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
@@ -16,7 +16,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import icon from '../../assets/images/icon.png';
-import { useAuth } from '@/lib/auth';
+import { friendlyError, loadSavedLoginInfo, useAuth } from '@/lib/auth';
 import { C, R, SP } from '@/lib/theme';
 
 function Field({
@@ -80,11 +80,24 @@ export default function LoginScreen() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPwd, setShowPwd] = useState(false);
+  const [remember, setRemember] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [ready, setReady] = useState(false);
+
+  // 预填上次登录信息（token 过期被登出时，通常只需点一下登录）
+  useEffect(() => {
+    loadSavedLoginInfo().then((info) => {
+      setUrl(info.baseUrl);
+      setUsername(info.username);
+      setPassword(info.password);
+      setRemember(info.remember);
+      setReady(true);
+    });
+  }, []);
 
   const doLogin = async () => {
-    if (busy) return;
+    if (busy || !ready) return;
     setError('');
     if (!url.trim() || !username.trim() || !password) {
       setError('请填写服务器地址、用户名和密码');
@@ -92,7 +105,7 @@ export default function LoginScreen() {
     }
     setBusy(true);
     try {
-      await login(url, username, password);
+      await login(url, username, password, remember);
       router.replace('/');
     } catch (e) {
       setError(e instanceof Error ? e.message : '登录失败，请重试');
@@ -100,6 +113,9 @@ export default function LoginScreen() {
       setBusy(false);
     }
   };
+
+  // 预填未就绪时不渲染表单，避免先空白后填充的闪烁
+  if (!ready) return null;
 
   return (
     <LinearGradient colors={['#151A2C', '#0B0D13', '#171106']} locations={[0, 0.5, 1]} style={{ flex: 1 }}>
@@ -129,6 +145,24 @@ export default function LoginScreen() {
                 secure={!showPwd}
                 toggle={() => setShowPwd((v) => !v)}
               />
+
+              <Pressable onPress={() => setRemember((v) => !v)} style={{ flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 2 }}>
+                <View
+                  style={{
+                    width: 20,
+                    height: 20,
+                    borderRadius: 6,
+                    borderWidth: 1.5,
+                    borderColor: remember ? C.gold : '#3A4154',
+                    backgroundColor: remember ? C.gold : 'transparent',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  {remember ? <Ionicons name="checkmark" size={13} color="#1A1206" /> : null}
+                </View>
+                <Text style={{ color: C.text2, fontSize: 13 }}>记住密码（仅保存在本机）</Text>
+              </Pressable>
 
               {error ? (
                 <View style={{ flexDirection: 'row', gap: 6, alignItems: 'flex-start', backgroundColor: C.sealSoft, borderRadius: 10, padding: 10 }}>

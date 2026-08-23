@@ -49,7 +49,8 @@ export default function SettingsScreen() {
         style: 'destructive',
         onPress: async () => {
           setBusy(true);
-          await logout();
+          // 显式退出：全清（含服务器地址与记住的密码）；token 过期的自动登出只清 token、保留配置
+          await logout({ keepConfig: false });
           router.replace('/login');
         },
       },
