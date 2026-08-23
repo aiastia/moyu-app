@@ -38,6 +38,15 @@ jobs:
       - name: Apply release signing
         run: node scripts/apply-signing.js
 
+      - name: Tune gradle memory
+        run: |
+          if grep -q '^org.gradle.jvmargs=' android/gradle.properties; then
+            sed -i 's/^org.gradle.jvmargs=.*/org.gradle.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=1g/' android/gradle.properties
+          else
+            echo 'org.gradle.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=1g' >> android/gradle.properties
+          fi
+          cat android/gradle.properties
+
       - name: Build release APK
         working-directory: android
         run: ./gradlew assembleRelease --stacktrace
