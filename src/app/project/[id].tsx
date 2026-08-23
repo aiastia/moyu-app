@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { ChapterBadge, Chip, EmptyState, ProgressBar, ScreenHeader, SegmentedTabs, Skeleton, useToast } from '@/components/ui';
+import { ChapterBadge, Chip, EmptyState, ProgressBar, ScreenHeader, SegmentedTabs, SheetModal, Skeleton, useToast } from '@/components/ui';
 import { ForeshadowsPanel } from '@/components/ForeshadowsPanel';
 import { CharactersPanel } from '@/components/CharactersPanel';
 import { WorldsPanel } from '@/components/WorldsPanel';
@@ -46,6 +46,7 @@ export default function ProjectScreen() {
   const [project, setProject] = useState<ProjectDetail | null>(null);
   const [chapters, setChapters] = useState<ChapterRow[] | null>(null);
   const [outlines, setOutlines] = useState<OutlineItem[] | null>(null);
+  const [outlineDetail, setOutlineDetail] = useState<OutlineItem | null>(null);
   const [lastRead, setLastRead] = useState<ChapterRow | null>(null);
   const [tab, setTab] = useState<TabKey>('chapters');
   const [refreshing, setRefreshing] = useState(false);
@@ -344,20 +345,25 @@ export default function ProjectScreen() {
                     <Text style={{ color: C.gold, fontSize: 13.5, fontWeight: '700' }}>续写大纲</Text>
                   </Pressable>
                   {outlines.map((o) => (
-                    <View key={o.id} style={{ backgroundColor: C.card, borderWidth: 1, borderColor: C.borderSoft, borderRadius: R.m, padding: 13, gap: 6 }}>
+                    <Pressable
+                      key={o.id}
+                      onPress={() => setOutlineDetail(o)}
+                      style={({ pressed }) => ({ backgroundColor: pressed ? C.card2 : C.card, borderWidth: 1, borderColor: C.borderSoft, borderRadius: R.m, padding: 13, gap: 6 })}
+                    >
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                         <Text style={{ color: C.gold, fontSize: 12, fontWeight: '700' }}>第{o.chapter_number}章</Text>
                         <Text style={{ color: C.text, fontSize: 13.5, fontWeight: '700', flex: 1 }} numberOfLines={1}>
                           {o.title || '未命名'}
                         </Text>
                         {o.emotion ? <Chip label={o.emotion} /> : null}
+                        <Ionicons name="chevron-forward" size={14} color={C.text3} />
                       </View>
                       {o.summary ? (
-                        <Text style={{ color: C.text2, fontSize: 12, lineHeight: 18 }} numberOfLines={3}>
+                        <Text style={{ color: C.text2, fontSize: 12, lineHeight: 18 }} numberOfLines={2}>
                           {o.summary}
                         </Text>
                       ) : null}
-                    </View>
+                    </Pressable>
                   ))}
                 </View>
               )
@@ -398,6 +404,46 @@ export default function ProjectScreen() {
           </>
         ) : null}
       </ScrollView>
+
+      {/* 大纲详情 */}
+      <SheetModal visible={outlineDetail !== null} onClose={() => setOutlineDetail(null)} title={`第${outlineDetail?.chapter_number ?? '—'}章 · ${outlineDetail?.title || '未命名'}`}>
+        {outlineDetail ? (
+          <View style={{ gap: 12 }}>
+            {(outlineDetail.emotion || outlineDetail.goal) && (
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                {outlineDetail.emotion ? <Chip label={`情绪 · ${outlineDetail.emotion}`} fg={C.gold} bg={C.goldSoft} /> : null}
+                {outlineDetail.goal ? <Chip label={`目标 · ${outlineDetail.goal}`} /> : null}
+              </View>
+            )}
+            {outlineDetail.summary ? (
+              <View style={{ backgroundColor: '#0F121B', borderWidth: 1, borderColor: '#242A3B', borderRadius: R.m, padding: 13, gap: 6 }}>
+                <Text style={{ color: C.text2, fontSize: 12, fontWeight: '700' }}>本章摘要</Text>
+                <Text style={{ color: C.text, fontSize: 13.5, lineHeight: 22 }}>{outlineDetail.summary}</Text>
+              </View>
+            ) : null}
+            {outlineDetail.key_points?.trim() ? (
+              <View style={{ backgroundColor: '#0F121B', borderWidth: 1, borderColor: '#242A3B', borderRadius: R.m, padding: 13, gap: 8 }}>
+                <Text style={{ color: C.text2, fontSize: 12, fontWeight: '700' }}>关键要点</Text>
+                {outlineDetail.key_points
+                  .split(/\n+/)
+                  .map((s) => s.trim())
+                  .filter(Boolean)
+                  .map((kp, i) => (
+                    <View key={i} style={{ flexDirection: 'row', gap: 8 }}>
+                      <Text style={{ color: C.gold, fontSize: 12.5, lineHeight: 20 }}>▪</Text>
+                      <Text style={{ color: C.text, fontSize: 13.5, lineHeight: 20, flex: 1 }}>{kp}</Text>
+                    </View>
+                  ))}
+              </View>
+            ) : null}
+            {!outlineDetail.summary && !outlineDetail.key_points?.trim() ? (
+              <Text style={{ color: C.text3, fontSize: 12.5, lineHeight: 19, textAlign: 'center', paddingVertical: 14 }}>
+                这章大纲没有填摘要和要点
+              </Text>
+            ) : null}
+          </View>
+        ) : null}
+      </SheetModal>
     </SafeAreaView>
   );
 }

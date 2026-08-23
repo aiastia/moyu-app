@@ -78,6 +78,7 @@ export interface OutlineItem {
   summary?: string | null;
   emotion?: string | null;
   goal?: string | null;
+  key_points?: string | null;
 }
 
 export interface CharacterItem {

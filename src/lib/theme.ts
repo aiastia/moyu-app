@@ -55,6 +55,8 @@ export interface ReaderPrefs {
   fontSize: number;
   theme: ReaderThemeKey;
   fontKey: string;
+  /** 导入的自定义字体显示名（fontKey==='custom' 时生效） */
+  customFontLabel?: string;
 }
 
 export const DEFAULT_READER_PREFS: ReaderPrefs = { fontSize: 18, theme: 'night', fontKey: 'default' };

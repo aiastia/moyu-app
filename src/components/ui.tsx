@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import React, { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { Animated, Modal, Pressable, ScrollView, Text, TextInput, View, type ViewStyle } from 'react-native';
+import { Animated, Modal, Pressable, ScrollView, Text, TextInput, View, useWindowDimensions, type ViewStyle } from 'react-native';
 
 import { C, R } from '@/lib/theme';
 
@@ -199,8 +199,12 @@ export function Input({
   );
 }
 
-/** 底部弹层表单壳：整层半透明遮罩 + 圆角面板浮在上面（圆角缺口透出遮罩色，不会露白边） */
+/** 底部弹层表单壳：整层半透明遮罩 + 圆角面板浮在上面（圆角缺口透出遮罩色，不会露白边）。
+ *  滚动约束必须直接加在 ScrollView 自己身上（具体像素 maxHeight）：只给外层面板 maxHeight
+ *  时 ScrollView 会按内容自报全高，面板裁掉溢出但 ScrollView 不认为自己可滚——长表单
+ *  （如角色编辑）下半截被裁且拖不动，就是这个问题。 */
 export function SheetModal({ visible, onClose, title, children }: { visible: boolean; onClose: () => void; title: string; children: React.ReactNode }) {
+  const { height: winH } = useWindowDimensions();
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose} statusBarTranslucent navigationBarTranslucent>
       <Pressable style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={onClose}>
@@ -224,7 +228,7 @@ export function SheetModal({ visible, onClose, title, children }: { visible: boo
               <Ionicons name="close" size={21} color={C.text2} />
             </Pressable>
           </View>
-          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 12, paddingBottom: 6 }}>
+          <ScrollView style={{ maxHeight: Math.round(winH * 0.62) }} keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 12, paddingBottom: 6 }}>
             {children}
           </ScrollView>
         </Pressable>

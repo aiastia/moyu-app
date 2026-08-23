@@ -1,9 +1,12 @@
 import { Ionicons } from '@expo/vector-icons';
+import * as DocumentPicker from 'expo-document-picker';
+import * as Font from 'expo-font';
 import { StatusBar } from 'expo-status-bar';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as FileSystem from 'expo-file-system/legacy';
 
 import type { ChapterFull, ChapterNav } from '@/lib/api';
 import { ApiError } from '@/lib/api';
@@ -11,6 +14,10 @@ import { friendlyError, loadReaderPrefs, saveLastRead, saveReaderPrefs, useAuth 
 import { SheetModal, useToast } from '@/components/ui';
 import { getChapterVersion } from '@/lib/version';
 import { C, DEFAULT_READER_PREFS, READER_FONTS, READER_THEMES, type ReaderPrefs } from '@/lib/theme';
+
+/** 用户导入的自定义字体：固定存一份在应用沙箱，启动时重新注册 */
+const CUSTOM_FONT_FAMILY = 'moyu-custom-font';
+const CUSTOM_FONT_FILE = () => FileSystem.documentDirectory + 'reader-custom-font.ttf';
 
 export default function ReaderScreen() {
   const { projectId: pid, chapterId: cid, canGenerate, reason } = useLocalSearchParams<{
@@ -34,13 +41,73 @@ export default function ReaderScreen() {
   const [toast, toastNode] = useToast();
   const scrollRef = useRef<ScrollView>(null);
   const loadedVersion = useRef(0);
+  const [importingFont, setImportingFont] = useState(false);
+  const [customFontReady, setCustomFontReady] = useState(false);
 
   const theme = useMemo(() => READER_THEMES.find((t) => t.key === prefs.theme) ?? READER_THEMES[0], [prefs.theme]);
   const isLight = prefs.theme !== 'night';
 
+  /** 启动时恢复自定义字体（字体文件不会随进程存活，需重新注册）；失败回落默认 */
+  const restoreCustomFont = async (label: string | undefined): Promise<boolean> => {
+    try {
+      const info = await FileSystem.getInfoAsync(CUSTOM_FONT_FILE());
+      if (!info.exists) return false;
+      if (!Font.isLoaded(CUSTOM_FONT_FAMILY)) {
+        await Font.loadAsync({ [CUSTOM_FONT_FAMILY]: CUSTOM_FONT_FILE() });
+      }
+      setCustomFontReady(true);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   useEffect(() => {
-    loadReaderPrefs().then(setPrefs);
+    loadReaderPrefs().then(async (p) => {
+      setPrefs(p);
+      if (p.fontKey === 'custom') {
+        const ok = await restoreCustomFont(p.customFontLabel);
+        if (!ok) {
+          const next = { ...p, fontKey: 'default' };
+          setPrefs(next);
+          saveReaderPrefs(next);
+        }
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  /** 从设备导入字体文件（ttf/otf/ttc），拷进沙箱并立即应用 */
+  const importFont = async () => {
+    if (importingFont) return;
+    const res = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true, type: '*/*' });
+    if (res.canceled) return;
+    const file = res.assets?.[0];
+    if (!file) return;
+    if (!/\.(ttf|otf|ttc)$/i.test(file.name ?? '')) {
+      toast('只支持 .ttf / .otf / .ttc 字体文件');
+      return;
+    }
+    setImportingFont(true);
+    try {
+      const dest = CUSTOM_FONT_FILE();
+      const old = await FileSystem.getInfoAsync(dest);
+      if (old.exists) await FileSystem.deleteAsync(dest, { idempotent: true });
+      await FileSystem.copyAsync({ from: file.uri, to: dest });
+      if (Font.isLoaded(CUSTOM_FONT_FAMILY)) await Font.unloadAsync(CUSTOM_FONT_FAMILY);
+      await Font.loadAsync({ [CUSTOM_FONT_FAMILY]: dest });
+      const label = (file.name ?? '自定义').replace(/\.(ttf|otf|ttc)$/i, '');
+      setCustomFontReady(true);
+      const next = { ...prefs, fontKey: 'custom', customFontLabel: label };
+      setPrefs(next);
+      saveReaderPrefs(next);
+      toast(`已应用字体「${label}」`);
+    } catch {
+      toast('这个字体文件加载失败，换一个试试');
+    } finally {
+      setImportingFont(false);
+    }
+  };
 
   const load = useCallback(
     async (silent = false) => {
@@ -114,7 +181,10 @@ export default function ReaderScreen() {
   };
 
   const paragraphs = useMemo(() => (chapter?.content ? chapter.content.split(/\n+/).map((s) => s.trim()).filter(Boolean) : []), [chapter]);
-  const bodyFont = useMemo(() => READER_FONTS.find((f) => f.key === prefs.fontKey)?.fontFamily, [prefs.fontKey]);
+  const bodyFont = useMemo(
+    () => (prefs.fontKey === 'custom' && customFontReady ? CUSTOM_FONT_FAMILY : READER_FONTS.find((f) => f.key === prefs.fontKey)?.fontFamily),
+    [prefs.fontKey, customFontReady],
+  );
   const lineGap = Math.round(prefs.fontSize * 0.95);
 
   return (
@@ -329,7 +399,48 @@ export default function ReaderScreen() {
                 </Pressable>
               );
             })}
+            {customFontReady && prefs.customFontLabel ? (
+              <Pressable
+                onPress={() => updatePrefs({ fontKey: 'custom' })}
+                style={{
+                  paddingHorizontal: 14,
+                  height: 36,
+                  borderRadius: 12,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  backgroundColor: prefs.fontKey === 'custom' ? C.goldSoft : C.card2,
+                  borderWidth: 1,
+                  borderColor: prefs.fontKey === 'custom' ? 'rgba(229,181,88,0.45)' : C.border,
+                }}
+              >
+                <Text style={{ color: prefs.fontKey === 'custom' ? C.gold : C.text2, fontSize: 14, fontWeight: '600', fontFamily: CUSTOM_FONT_FAMILY }}>
+                  {prefs.customFontLabel}
+                </Text>
+              </Pressable>
+            ) : null}
+            <Pressable
+              onPress={importFont}
+              disabled={importingFont}
+              style={{
+                paddingHorizontal: 14,
+                height: 36,
+                borderRadius: 12,
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 5,
+                backgroundColor: 'transparent',
+                borderWidth: 1,
+                borderStyle: 'dashed',
+                borderColor: 'rgba(229,181,88,0.5)',
+                opacity: importingFont ? 0.6 : 1,
+              }}
+            >
+              {importingFont ? <ActivityIndicator size="small" color={C.gold} /> : <Ionicons name="add" size={14} color={C.gold} />}
+              <Text style={{ color: C.gold, fontSize: 13.5, fontWeight: '600' }}>导入设备字体</Text>
+            </Pressable>
           </View>
+          <Text style={{ color: C.text3, fontSize: 11.5, lineHeight: 17 }}>导入设备上的 .ttf / .otf 字体文件（如下载的字体包），只对阅读正文生效</Text>
         </View>
       </SheetModal>
     </View>
