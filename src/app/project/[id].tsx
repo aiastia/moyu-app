@@ -179,7 +179,7 @@ export default function ProjectScreen() {
     <SafeAreaView style={{ flex: 1, backgroundColor: C.bg }} edges={['top']}>
       {toastNode}
       <ScrollView
-        contentContainerStyle={{ padding: SP.l, gap: 14, paddingBottom: 36 }}
+        contentContainerStyle={{ flexGrow: 1, padding: SP.l, gap: 14, paddingBottom: 36 }}
         refreshControl={<RefreshControl refreshing={refreshing} tintColor={C.gold} colors={[C.gold]} onRefresh={onRefresh} />}
       >
         <ScreenHeader title={project?.title ?? '加载中…'} onBack={() => router.back()} />

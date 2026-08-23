@@ -59,7 +59,7 @@ export default function SettingsScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: C.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ padding: SP.l, gap: 14, paddingBottom: 40 }}>
+      <ScrollView contentContainerStyle={{ flexGrow: 1, padding: SP.l, gap: 14, paddingBottom: 40 }}>
         <ScreenHeader title="设置" />
 
         <Card>

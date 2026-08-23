@@ -83,7 +83,7 @@ export default function CreateBookScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: C.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ padding: SP.l, gap: 14, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
+      <ScrollView contentContainerStyle={{ flexGrow: 1, padding: SP.l, gap: 14, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
         <ScreenHeader title="新建作品" subtitle="创建后会出现在书架上" onBack={() => router.back()} />
 
         <View style={{ backgroundColor: C.card, borderRadius: R.l, borderWidth: 1, borderColor: C.borderSoft, padding: SP.l, gap: 14 }}>

@@ -369,7 +369,7 @@ export default function TasksScreen() {
           <EmptyState icon="cloud-offline-outline" title="任务加载失败" sub={error} />
         ) : (
           <ScrollView
-            contentContainerStyle={{ gap: 12, paddingBottom: 28 }}
+            contentContainerStyle={{ flexGrow: 1, justifyContent: tasks?.length ? 'flex-start' : 'center', gap: 12, paddingBottom: 28 }}
             refreshControl={<RefreshControl refreshing={refreshing} tintColor={C.gold} colors={[C.gold]} onRefresh={onRefresh} />}
           >
             {tasks?.length ? (
