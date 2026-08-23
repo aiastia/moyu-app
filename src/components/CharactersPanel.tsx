@@ -1,9 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, Pressable, Text, View } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
 
-import { Chip, EmptyState, FieldLabel, Input, SelectField, SheetModal, Skeleton, useToast } from '@/components/ui';
+import { Chip, EmptyState, FieldLabel, Input, SelectField, SheetModal, Skeleton, useConfirm, useToast } from '@/components/ui';
 import { PortraitSheet } from '@/components/PortraitSheet';
 import type { CharacterBody, CharacterItem } from '@/lib/api';
 import { ApiError } from '@/lib/api';
@@ -38,6 +38,7 @@ export function CharactersPanel({ projectId }: { projectId: number }) {
   const [form, setForm] = useState<CharacterBody>({ name: '', role: '配角', gender: '', age: '', identity: '', appearance: '', personality: '', background: '', ability: '', story_goal: '', motivation: '', weakness: '' });
   const [saving, setSaving] = useState(false);
   const [toast, toastNode] = useToast();
+  const [confirm, confirmNode] = useConfirm();
   const [portraitChar, setPortraitChar] = useState<CharacterItem | null>(null);
   const [aiOpen, setAiOpen] = useState(false);
   const [aiCount, setAiCount] = useState(3);
@@ -115,16 +116,15 @@ export function CharactersPanel({ projectId }: { projectId: number }) {
 
   const remove = (c: CharacterItem) => {
     if (!api) return;
-    Alert.alert('删除角色', `确定删除「${c.name}」？关联的关系与档案将一并处理，不可恢复。`, [
-      { text: '取消', style: 'cancel' },
-      {
-        text: '删除',
-        style: 'destructive',
-        onPress: () => {
-          api.deleteCharacter(projectId, c.id).then(load).catch((e) => toast(friendlyError(e)));
-        },
+    confirm({
+      title: '删除角色',
+      message: `确定删除「${c.name}」？关联的关系与档案将一并处理，不可恢复。`,
+      confirmText: '删除',
+      destructive: true,
+      onConfirm: () => {
+        api.deleteCharacter(projectId, c.id).then(load).catch((e) => toast(friendlyError(e)));
       },
-    ]);
+    });
   };
 
   /** 提交 AI 批量生成角色（异步任务，任务页看进度） */
@@ -147,6 +147,7 @@ export function CharactersPanel({ projectId }: { projectId: number }) {
   return (
     <View style={{ gap: 10 }}>
       {toastNode}
+      {confirmNode}
       <View style={{ flexDirection: 'row', gap: 10 }}>
         <Pressable
           onPress={openNew}

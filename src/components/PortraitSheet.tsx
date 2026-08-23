@@ -1,8 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Image, Pressable, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, Image, Pressable, ScrollView, Text, View } from 'react-native';
 
-import { Chip, FieldLabel, Input, SheetModal, useToast } from '@/components/ui';
+import { Chip, FieldLabel, Input, SheetModal, useConfirm, useToast } from '@/components/ui';
 import type { CharacterItem } from '@/lib/api';
 import { friendlyError, useAuth } from '@/lib/auth';
 import { useAuthImage } from '@/lib/image';
@@ -48,6 +48,7 @@ export function PortraitSheet({
   const [phase, setPhase] = useState('');
   const [imgVersion, setImgVersion] = useState(0);
   const [toast, toastNode] = useToast();
+  const [confirm, confirmNode] = useConfirm();
 
   const hasImage = !!character?.reference_image && character.reference_image !== 'manual';
   const portraitUri = useAuthImage(
@@ -144,30 +145,35 @@ export function PortraitSheet({
 
   const removeImage = () => {
     if (!api || !character) return;
-    Alert.alert('删除立绘', `删除「${character.name}」的立绘图片？（提示词保留，可重新出图）`, [
-      { text: '取消', style: 'cancel' },
-      {
-        text: '删除',
-        style: 'destructive',
-        onPress: () => {
-          api
-            .deletePortraitImage(projectId, character.id)
-            .then(() => {
-              setImgVersion((v) => v + 1);
-              onUpdated();
-              toast('已删除');
-            })
-            .catch((e) => toast(friendlyError(e)));
-        },
+    confirm({
+      title: '删除立绘',
+      message: `删除「${character.name}」的立绘图片？（提示词保留，可重新出图）`,
+      confirmText: '删除',
+      destructive: true,
+      onConfirm: () => {
+        api
+          .deletePortraitImage(projectId, character.id)
+          .then(() => {
+            setImgVersion((v) => v + 1);
+            onUpdated();
+            toast('已删除');
+          })
+          .catch((e) => toast(friendlyError(e)));
       },
-    ]);
+    });
   };
 
-  if (!character) return <>{toastNode}</>;
+  if (!character) return (
+    <>
+      {toastNode}
+      {confirmNode}
+    </>
+  );
 
   return (
     <>
       {toastNode}
+      {confirmNode}
       <SheetModal
         visible={visible}
         onClose={() => {

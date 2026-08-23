@@ -1,9 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 
-import { FieldLabel, Input, SheetModal, useToast } from '@/components/ui';
+import { FieldLabel, Input, SheetModal, useConfirm, useToast } from '@/components/ui';
 import { friendlyError, useAuth } from '@/lib/auth';
 import { C, R } from '@/lib/theme';
 
@@ -66,6 +66,7 @@ export function AutoWriteSheet({ projectId }: { projectId: number }) {
   const [direction, setDirection] = useState('');
   const [busy, setBusy] = useState(false);
   const [toast, toastNode] = useToast();
+  const [confirm, confirmNode] = useConfirm();
 
   const submit = async () => {
     if (!api || busy) return;
@@ -79,10 +80,13 @@ export function AutoWriteSheet({ projectId }: { projectId: number }) {
         story_direction: direction.trim() || undefined,
       });
       setOpen(false);
-      Alert.alert('连写已启动', `目标写满 ${total} 章。每章约 5-12 分钟，可随时在任务页看进度或取消。`, [
-        { text: '留在本页' },
-        { text: '去任务页', onPress: () => router.navigate('/tasks') },
-      ]);
+      confirm({
+        title: '连写已启动',
+        message: `目标写满 ${total} 章。每章约 5-12 分钟，可随时在任务页看进度或取消。`,
+        cancelText: '留在本页',
+        confirmText: '去任务页',
+        onConfirm: () => router.navigate('/tasks'),
+      });
     } catch (e) {
       toast(friendlyError(e));
     } finally {
@@ -93,6 +97,7 @@ export function AutoWriteSheet({ projectId }: { projectId: number }) {
   return (
     <View>
       {toastNode}
+      {confirmNode}
       <Pressable
         onPress={() => setOpen(true)}
         style={({ pressed }) => ({

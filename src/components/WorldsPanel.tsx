@@ -1,8 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 
-import { Chip, EmptyState, FieldLabel, Input, SelectField, SheetModal, Skeleton, useToast } from '@/components/ui';
+import { Chip, EmptyState, FieldLabel, Input, SelectField, SheetModal, Skeleton, useConfirm, useToast } from '@/components/ui';
 import type { WorldItem } from '@/lib/api';
 import { ApiError } from '@/lib/api';
 import { friendlyError, useAuth } from '@/lib/auth';
@@ -19,6 +19,7 @@ export function WorldsPanel({ projectId }: { projectId: number }) {
   const [content, setContent] = useState('');
   const [saving, setSaving] = useState(false);
   const [toast, toastNode] = useToast();
+  const [confirm, confirmNode] = useConfirm();
   const [aiOpen, setAiOpen] = useState(false);
   const [aiIdea, setAiIdea] = useState('');
   const [aiBusy, setAiBusy] = useState(false);
@@ -83,16 +84,15 @@ export function WorldsPanel({ projectId }: { projectId: number }) {
 
   const remove = (w: WorldItem) => {
     if (!api) return;
-    Alert.alert('删除设定', `确定删除「${w.name}」？此操作不可恢复。`, [
-      { text: '取消', style: 'cancel' },
-      {
-        text: '删除',
-        style: 'destructive',
-        onPress: () => {
-          api.deleteWorld(projectId, w.id).then(load).catch((e) => toast(friendlyError(e)));
-        },
+    confirm({
+      title: '删除设定',
+      message: `确定删除「${w.name}」？此操作不可恢复。`,
+      confirmText: '删除',
+      destructive: true,
+      onConfirm: () => {
+        api.deleteWorld(projectId, w.id).then(load).catch((e) => toast(friendlyError(e)));
       },
-    ]);
+    });
   };
 
   /** 下拉分类选项：服务端统一清单 + 兼容历史自定义值 */
@@ -124,6 +124,7 @@ export function WorldsPanel({ projectId }: { projectId: number }) {
   return (
     <View style={{ gap: 10 }}>
       {toastNode}
+      {confirmNode}
       <View style={{ flexDirection: 'row', gap: 10 }}>
         <Pressable
           onPress={openNew}

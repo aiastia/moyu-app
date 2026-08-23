@@ -1,10 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { FieldLabel, Input, ScreenHeader } from '@/components/ui';
+import { FieldLabel, Input, ScreenHeader, useConfirm, useToast } from '@/components/ui';
 import { friendlyError, useAuth } from '@/lib/auth';
 import { C, R, SP } from '@/lib/theme';
 
@@ -53,11 +53,13 @@ export default function CreateBookScreen() {
   const [targetWan, setTargetWan] = useState('50');
   const [penName, setPenName] = useState('');
   const [busy, setBusy] = useState(false);
+  const [toast, toastNode] = useToast();
+  const [confirm, confirmNode] = useConfirm();
 
   const submit = async () => {
     if (!api || busy) return;
     if (!title.trim()) {
-      Alert.alert('提示', '书名还没填哦');
+      toast('书名还没填哦');
       return;
     }
     setBusy(true);
@@ -71,11 +73,15 @@ export default function CreateBookScreen() {
         target_word_count: (Number(targetWan) || 0) * 10000,
         pen_name: penName.trim() || undefined,
       });
-      Alert.alert('创建成功', `《${title.trim()}》已创建。可以在网页端跑一键初始化，或直接在这里生成大纲。`, [
-        { text: '好', onPress: () => router.back() },
-      ]);
+      confirm({
+        title: '创建成功',
+        message: `《${title.trim()}》已创建。可以在网页端跑一键初始化，或直接在这里生成大纲。`,
+        cancelText: '',
+        confirmText: '好',
+        onConfirm: () => router.back(),
+      });
     } catch (e) {
-      Alert.alert('创建失败', friendlyError(e));
+      toast(friendlyError(e));
     } finally {
       setBusy(false);
     }
@@ -83,6 +89,8 @@ export default function CreateBookScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: C.bg }} edges={['top']}>
+      {toastNode}
+      {confirmNode}
       <ScrollView contentContainerStyle={{ flexGrow: 1, padding: SP.l, gap: 14, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
         <ScreenHeader title="新建作品" subtitle="创建后会出现在书架上" onBack={() => router.back()} />
 

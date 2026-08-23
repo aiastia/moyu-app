@@ -1,10 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { FlatList, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { Chip, EmptyState, ProgressBar, ScreenHeader, SheetModal, Skeleton, useToast } from '@/components/ui';
+import { Chip, EmptyState, ProgressBar, ScreenHeader, SheetModal, Skeleton, useConfirm, useToast } from '@/components/ui';
 import type { TaskItem } from '@/lib/api';
 import { ApiError } from '@/lib/api';
 import { friendlyError, useAuth } from '@/lib/auth';
@@ -34,12 +34,13 @@ function statusStyle(status: string): { fg: string; bg: string } {
   }
 }
 
-function TaskCard({ task, onPress, onCancel, onRetry }: { task: TaskItem; onPress: () => void; onCancel: (t: TaskItem) => void; onRetry: (t: TaskItem) => void }) {
+/** memo：页面每 10s 轮询刷新列表，无变化的卡片跳过重渲（回调必须传稳定引用） */
+const TaskCard = memo(function TaskCard({ task, onOpen, onCancel, onRetry }: { task: TaskItem; onOpen: (t: TaskItem) => void; onCancel: (t: TaskItem) => void; onRetry: (t: TaskItem) => void }) {
   const s = statusStyle(task.status);
   const active = task.status === 'running' || task.status === 'pending';
   return (
     <Pressable
-      onPress={onPress}
+      onPress={() => onOpen(task)}
       style={({ pressed }) => ({
         backgroundColor: pressed ? C.card2 : C.card,
         borderRadius: R.l,
@@ -97,7 +98,7 @@ function TaskCard({ task, onPress, onCancel, onRetry }: { task: TaskItem; onPres
       </View>
     </Pressable>
   );
-}
+});
 
 function InfoLine({ label, value }: { label: string; value?: string | null }) {
   if (!value) return null;
@@ -206,6 +207,7 @@ export default function TasksScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [toast, toastNode] = useToast();
+  const [confirm, confirmNode] = useConfirm();
   const [detailTask, setDetailTask] = useState<TaskItem | null>(null);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -253,14 +255,15 @@ export default function TasksScreen() {
     setRefreshing(false);
   }, [load]);
 
-  const doCancel = (t: TaskItem) => {
-    if (!api) return;
-    Alert.alert('取消任务', `确定取消「${t.title || t.task_type}」？正在进行的 AI 调用会跑完当前步骤后停止。`, [
-      { text: '返回', style: 'cancel' },
-      {
-        text: '取消任务',
-        style: 'destructive',
-        onPress: () =>
+  const doCancel = useCallback(
+    (t: TaskItem) => {
+      if (!api) return;
+      confirm({
+        title: '取消任务',
+        message: `确定取消「${t.title || t.task_type}」？正在进行的 AI 调用会跑完当前步骤后停止。`,
+        confirmText: '取消任务',
+        destructive: true,
+        onConfirm: () =>
           api
             .cancelTask(t.id)
             .then(() => {
@@ -268,59 +271,65 @@ export default function TasksScreen() {
               load(true);
             })
             .catch((e) => toast(friendlyError(e))),
-      },
-    ]);
-  };
+      });
+    },
+    [api, confirm, load, toast],
+  );
 
-  const doRetry = (t: TaskItem) => {
-    if (!api) return;
-    api
-      .retryTask(t.id)
-      .then((r) => {
-        toast(`已重新提交（新任务 #${r.task_id}）`);
-        load(true);
-      })
-      .catch((e) => toast(friendlyError(e)));
-  };
+  const doRetry = useCallback(
+    (t: TaskItem) => {
+      if (!api) return;
+      api
+        .retryTask(t.id)
+        .then((r) => {
+          toast(`已重新提交（新任务 #${r.task_id}）`);
+          load(true);
+        })
+        .catch((e) => toast(friendlyError(e)));
+    },
+    [api, load, toast],
+  );
 
-  const doDelete = (t: TaskItem) => {
-    if (!api) return;
-    Alert.alert('删除记录', '只删除这条任务记录，不影响已生成的正文。', [
-      { text: '取消', style: 'cancel' },
-      {
-        text: '删除',
-        style: 'destructive',
-        onPress: () =>
+  const doDelete = useCallback(
+    (t: TaskItem) => {
+      if (!api) return;
+      confirm({
+        title: '删除记录',
+        message: '只删除这条任务记录，不影响已生成的正文。',
+        confirmText: '删除',
+        destructive: true,
+        onConfirm: () =>
           api
             .deleteTask(t.id)
             .then(() => load(true))
             .catch((e) => toast(friendlyError(e))),
-      },
-    ]);
-  };
+      });
+    },
+    [api, confirm, load, toast],
+  );
 
-  const doClearCompleted = () => {
+  const doClearCompleted = useCallback(() => {
     if (!api) return;
-    Alert.alert('清空已完成', '删除所有已完成/已取消/失败的任务记录？', [
-      { text: '取消', style: 'cancel' },
-      {
-        text: '清空',
-        style: 'destructive',
-        onPress: () =>
-          api
-            .clearCompletedTasks()
-            .then((r) => {
-              toast(`已清理 ${r.deleted} 条`);
-              load(true);
-            })
-            .catch((e) => toast(friendlyError(e))),
-      },
-    ]);
-  };
+    confirm({
+      title: '清空已完成',
+      message: '删除所有已完成/已取消/失败的任务记录？',
+      confirmText: '清空',
+      destructive: true,
+      onConfirm: () =>
+        api
+          .clearCompletedTasks()
+          .then((r) => {
+            toast(`已清理 ${r.deleted} 条`);
+            load(true);
+          })
+          .catch((e) => toast(friendlyError(e))),
+    });
+  }, [api, confirm, load, toast]);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: C.bg }} edges={['top']}>
       {toastNode}
+      {confirmNode}
       <TaskDetailSheet task={detailTask} onClose={() => setDetailTask(null)} onCancel={doCancel} onRetry={doRetry} onDelete={doDelete} />
       <View style={{ paddingHorizontal: SP.l, paddingTop: 10, gap: 14, flex: 1 }}>
         <ScreenHeader
@@ -337,7 +346,11 @@ export default function TasksScreen() {
           }
         />
 
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+        {/* 筛选条必须是普通 View：RN ScrollView 自带 flexGrow:1，若这里用横向 ScrollView，
+            会和下方任务列表平分页面剩余空间，筛选条被撑到数百像素高、把卡片推到屏幕中部
+            （2026-08-24 模拟器原生层实测：横向 ScrollView 内容 84px 却占 586px 高，
+            此前 v1.4.2/v1.6.0 两次"短内容居中"误诊的真凶）。 */}
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
           {FILTERS.map((f) => {
             const on = filter === f.key;
             return (
@@ -359,7 +372,7 @@ export default function TasksScreen() {
               </Pressable>
             );
           })}
-        </ScrollView>
+        </View>
 
         {tasks === null && !error ? (
           <View style={{ flex: 1 }}>
@@ -368,21 +381,14 @@ export default function TasksScreen() {
         ) : error && !tasks ? (
           <EmptyState icon="cloud-offline-outline" title="任务加载失败" sub={error} />
         ) : (
-          <ScrollView
-            // 有任务时 flexGrow 必须为 0：本机 Fabric 实测内容容器 flexGrow:1 时短内容会被垂直居中
-            // （justifyContent:flex-start 不生效，v1.4.2 已踩坑）；容器按内容自适应高度才稳定贴顶，
-            // 与书架页 FlatList 同款写法。空态才 flexGrow:1 + center 居中"暂无任务"。
+          <FlatList
+            data={tasks ?? []}
+            keyExtractor={(t) => String(t.id)}
+            renderItem={({ item }) => <TaskCard task={item} onOpen={setDetailTask} onCancel={doCancel} onRetry={doRetry} />}
             contentContainerStyle={{ flexGrow: tasks?.length ? 0 : 1, justifyContent: tasks?.length ? undefined : 'center', gap: 12, paddingBottom: 28 }}
             refreshControl={<RefreshControl refreshing={refreshing} tintColor={C.gold} colors={[C.gold]} onRefresh={onRefresh} />}
-          >
-            {tasks?.length ? (
-              tasks.map((t) => (
-                <TaskCard key={t.id} task={t} onPress={() => setDetailTask(t)} onCancel={doCancel} onRetry={doRetry} />
-              ))
-            ) : (
-              <EmptyState icon="flash-outline" title="暂无任务" sub="在网页端发起章节生成、润色等操作后，可以在这里盯进度" />
-            )}
-          </ScrollView>
+            ListEmptyComponent={<EmptyState icon="flash-outline" title="暂无任务" sub="在网页端发起章节生成、润色等操作后，可以在这里盯进度" />}
+          />
         )}
       </View>
     </SafeAreaView>

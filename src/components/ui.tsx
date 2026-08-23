@@ -30,6 +30,76 @@ export function useToast(): [(msg: string) => void, ReactNode] {
   return [show, msg ? <ToastView message={msg} /> : null];
 }
 
+/** 确认弹窗选项。cancelText 传 '' 隐藏取消按钮（纯提示型，替代单按钮 Alert） */
+export interface ConfirmOptions {
+  title: string;
+  message?: string;
+  confirmText?: string;
+  cancelText?: string;
+  /** 危险操作：确认按钮红色 */
+  destructive?: boolean;
+  onConfirm?: () => void;
+  onCancel?: () => void;
+}
+
+/** 返回 [confirm函数, 挂载节点]；替代原生 Alert.alert 的确认/提示弹窗，风格与 App 一致 */
+export function useConfirm(): [(opts: ConfirmOptions) => void, ReactNode] {
+  const [opts, setOpts] = useState<ConfirmOptions | null>(null);
+  const show = useCallback((o: ConfirmOptions) => setOpts(o), []);
+  const close = useCallback(() => setOpts(null), []);
+  const node = opts ? (
+    <Modal visible animationType="fade" transparent onRequestClose={close} statusBarTranslucent navigationBarTranslucent>
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 36 }}>
+        <Pressable
+          onPress={() => {
+            close();
+            opts.onCancel?.();
+          }}
+          style={{ position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, backgroundColor: 'rgba(0,0,0,0.55)' }}
+        />
+        <View style={{ backgroundColor: '#141826', borderRadius: 20, borderWidth: 1, borderColor: '#262C3F', padding: 22, width: '100%', maxWidth: 340, gap: 15 }}>
+          <Text style={{ color: C.text, fontSize: 16, fontWeight: '800', textAlign: 'center' }}>{opts.title}</Text>
+          {opts.message ? (
+            <Text style={{ color: C.text2, fontSize: 13, lineHeight: 20, textAlign: 'center' }}>{opts.message}</Text>
+          ) : null}
+          <View style={{ flexDirection: 'row', gap: 10 }}>
+            {opts.cancelText !== '' ? (
+              <Pressable
+                onPress={() => {
+                  close();
+                  opts.onCancel?.();
+                }}
+                style={{ flex: 1, height: 42, borderRadius: 13, backgroundColor: C.card2, borderWidth: 1, borderColor: C.border, alignItems: 'center', justifyContent: 'center' }}
+              >
+                <Text style={{ color: C.text2, fontSize: 14, fontWeight: '600' }}>{opts.cancelText ?? '取消'}</Text>
+              </Pressable>
+            ) : null}
+            <Pressable
+              onPress={() => {
+                close();
+                opts.onConfirm?.();
+              }}
+              style={{
+                flex: 1,
+                height: 42,
+                borderRadius: 13,
+                alignItems: 'center',
+                justifyContent: 'center',
+                backgroundColor: opts.destructive ? C.sealSoft : C.gold,
+                borderWidth: 1,
+                borderColor: opts.destructive ? 'rgba(214,90,69,0.4)' : 'rgba(229,181,88,0.2)',
+              }}
+            >
+              <Text style={{ color: opts.destructive ? C.seal : '#1A1206', fontSize: 14, fontWeight: '800' }}>{opts.confirmText ?? '确定'}</Text>
+            </Pressable>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  ) : null;
+  return [show, node];
+}
+
 /** 小标签 */
 export function Chip({ label, fg = C.text2, bg = C.card2, bold = false }: { label: string; fg?: string; bg?: string; bold?: boolean }) {
   return (

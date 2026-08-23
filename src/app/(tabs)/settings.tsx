@@ -2,11 +2,11 @@ import { Ionicons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
 import { router } from 'expo-router';
 import { Linking } from 'react-native';
-import { useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, ScrollView, Text, View } from 'react-native';
+import { useCallback, useState } from 'react';
+import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { ScreenHeader } from '@/components/ui';
+import { ScreenHeader, useConfirm } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
 import { C, R, SP } from '@/lib/theme';
 
@@ -37,28 +37,29 @@ function Row({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMap; lab
 export default function SettingsScreen() {
   const { user, baseUrl, logout } = useAuth();
   const [busy, setBusy] = useState(false);
+  const [confirm, confirmNode] = useConfirm();
 
   const name = user?.nickname || user?.username || '未登录';
   const initial = name.trim()[0] ?? '墨';
 
-  const doLogout = () => {
-    Alert.alert('退出登录', '将清除本机的登录状态，确定退出吗？', [
-      { text: '取消', style: 'cancel' },
-      {
-        text: '退出',
-        style: 'destructive',
-        onPress: async () => {
-          setBusy(true);
-          // 显式退出：全清（含服务器地址与记住的密码）；token 过期的自动登出只清 token、保留配置
-          await logout({ keepConfig: false });
-          router.replace('/login');
-        },
+  const doLogout = useCallback(() => {
+    confirm({
+      title: '退出登录',
+      message: '将清除本机的登录状态，确定退出吗？',
+      confirmText: '退出',
+      destructive: true,
+      onConfirm: async () => {
+        setBusy(true);
+        // 显式退出：全清（含服务器地址与记住的密码）；token 过期的自动登出只清 token、保留配置
+        await logout({ keepConfig: false });
+        router.replace('/login');
       },
-    ]);
-  };
+    });
+  }, [confirm, logout]);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: C.bg }} edges={['top']}>
+      {confirmNode}
       <ScrollView contentContainerStyle={{ flexGrow: 1, padding: SP.l, gap: 14, paddingBottom: 40 }}>
         <ScreenHeader title="设置" />
 

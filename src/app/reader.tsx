@@ -194,6 +194,16 @@ export default function ReaderScreen() {
     return opts;
   }, [customFontReady, prefs.customFontLabel]);
   const lineGap = Math.round(prefs.fontSize * 0.95);
+  /** 正文段落元素缓存：打开设置面板/Toast 之类的界面态变化不再重渲整章几十上百个 Text */
+  const paragraphEls = useMemo(
+    () =>
+      paragraphs.map((p, i) => (
+        <Text key={i} style={{ color: theme.text, fontSize: prefs.fontSize, lineHeight: lineGap, fontFamily: bodyFont, marginBottom: 14, textAlign: 'justify' }}>
+          {p}
+        </Text>
+      )),
+    [paragraphs, theme.text, prefs.fontSize, lineGap, bodyFont],
+  );
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>

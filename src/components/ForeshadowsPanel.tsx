@@ -1,9 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, Pressable, ScrollView, Text, View } from 'react-native';
+import { Pressable, ScrollView, Text, View } from 'react-native';
 
-import { Chip, EmptyState, FieldLabel, Input, SelectField, SheetModal, Skeleton, useToast } from '@/components/ui';
+import { Chip, EmptyState, FieldLabel, Input, SelectField, SheetModal, Skeleton, useConfirm, useToast } from '@/components/ui';
 import type { ForeshadowItem } from '@/lib/api';
 import { ApiError, FORESHADOW_STATUS_LABEL } from '@/lib/api';
 import { friendlyError, useAuth } from '@/lib/auth';
@@ -59,6 +59,7 @@ export function ForeshadowsPanel({ projectId }: { projectId: number }) {
   const [resolveCh, setResolveCh] = useState('');
   const [saving, setSaving] = useState(false);
   const [toast, toastNode] = useToast();
+  const [confirm, confirmNode] = useConfirm();
   const [planOpen, setPlanOpen] = useState(false);
   const [planSource, setPlanSource] = useState<'outline' | 'blueprint'>('outline');
   const [planFrom, setPlanFrom] = useState('');
@@ -169,22 +170,23 @@ export function ForeshadowsPanel({ projectId }: { projectId: number }) {
   };
 
   const doAbandon = (f: ForeshadowItem) => {
-    Alert.alert('放弃伏笔', `确定放弃「${f.title}」？`, [
-      { text: '取消', style: 'cancel' },
-      { text: '放弃', style: 'destructive', onPress: () => act(() => api!.abandonForeshadow(projectId, f.id), '已放弃') },
-    ]);
+    confirm({
+      title: '放弃伏笔',
+      message: `确定放弃「${f.title}」？`,
+      confirmText: '放弃',
+      destructive: true,
+      onConfirm: () => act(() => api!.abandonForeshadow(projectId, f.id), '已放弃'),
+    });
   };
 
   const doDelete = (f: ForeshadowItem) => {
-    Alert.alert('删除伏笔', `确定删除「${f.title}」？不可恢复。`, [
-      { text: '取消', style: 'cancel' },
-      {
-        text: '删除',
-        style: 'destructive',
-        onPress: () =>
-          act(() => api!.deleteForeshadow(projectId, f.id), '已删除').then(() => setEditing(null)),
-      },
-    ]);
+    confirm({
+      title: '删除伏笔',
+      message: `确定删除「${f.title}」？不可恢复。`,
+      confirmText: '删除',
+      destructive: true,
+      onConfirm: () => act(() => api!.deleteForeshadow(projectId, f.id), '已删除').then(() => setEditing(null)),
+    });
   };
 
   const planByAI = () => {
@@ -215,6 +217,7 @@ export function ForeshadowsPanel({ projectId }: { projectId: number }) {
   return (
     <View style={{ gap: 10 }}>
       {toastNode}
+      {confirmNode}
 
       <View style={{ flexDirection: 'row', gap: 10 }}>
         <Pressable

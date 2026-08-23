@@ -1,10 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { ChapterBadge, Chip, EmptyState, FieldLabel, ProgressBar, ScreenHeader, SegmentedTabs, SheetModal, Skeleton, useToast } from '@/components/ui';
+import { ChapterBadge, Chip, EmptyState, FieldLabel, Input, ProgressBar, ScreenHeader, SegmentedTabs, SheetModal, Skeleton, useConfirm, useToast } from '@/components/ui';
 import { ForeshadowsPanel } from '@/components/ForeshadowsPanel';
 import { CharactersPanel } from '@/components/CharactersPanel';
 import { WorldsPanel } from '@/components/WorldsPanel';
@@ -55,7 +55,11 @@ export default function ProjectScreen() {
   const [error, setError] = useState('');
   const [lastReadId, setLastReadId] = useState<number | null>(null);
   const [toast, toastNode] = useToast();
+  const [confirm, confirmNode] = useConfirm();
   const [coverVersion, setCoverVersion] = useState(0);
+  /** 大纲编辑表单（null=详情弹窗处于只读态） */
+  const [outlineEdit, setOutlineEdit] = useState<{ title: string; summary: string; emotion: string; goal: string; keyPoints: string } | null>(null);
+  const [outlineSaving, setOutlineSaving] = useState(false);
 
   const guard = useCallback(
     async (e: unknown) => {
@@ -108,52 +112,60 @@ export default function ProjectScreen() {
 
   const pct = useMemo(() => fmtPercent(project?.current_word_count, project?.target_word_count), [project]);
 
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await load(true);
     setRefreshing(false);
   }, [load]);
 
-  const goReader = (c: ChapterRow) =>
-    router.push({
-      pathname: '/reader',
-      params: {
-        projectId: String(projectId),
-        chapterId: String(c.id),
-        canGenerate: c.can_generate ? '1' : '0',
-        reason: c.generate_disabled_reason ?? '',
-      },
-    });
+  const goReader = useCallback(
+    (c: ChapterRow) =>
+      router.push({
+        pathname: '/reader',
+        params: {
+          projectId: String(projectId),
+          chapterId: String(c.id),
+          canGenerate: c.can_generate ? '1' : '0',
+          reason: c.generate_disabled_reason ?? '',
+        },
+      }),
+    [projectId],
+  );
 
   /** 提交单章生成任务 */
-  const submitChapterGenerate = (c: ChapterRow) => {
-    if (!api) return;
-    if (!c.can_generate) {
-      Alert.alert('暂时不能生成', c.generate_disabled_reason || '服务端暂未开放此章节的生成');
-      return;
-    }
-    const confirmThen = () => {
-      api
-        .generateChapter(projectId, c.id)
-        .then(() => toast(`已提交第${c.chapter_number}章生成任务，可在「任务」页看进度`))
-        .catch((e) => Alert.alert('提交失败', friendlyError(e)));
-    };
-    if (c.word_count > 0) {
-      Alert.alert(
-        '重新生成正文',
-        `第${c.chapter_number}章已有 ${c.word_count} 字正文，重新生成会覆盖当前内容（原文在服务端保留可回滚）。确定提交吗？`,
-        [
-          { text: '取消', style: 'cancel' },
-          { text: '重新生成', style: 'destructive', onPress: confirmThen },
-        ],
-      );
-    } else {
-      Alert.alert('生成正文', `提交第${c.chapter_number}章《${c.title || '未命名'}》的 AI 生成任务？`, [
-        { text: '取消', style: 'cancel' },
-        { text: '提交生成', onPress: confirmThen },
-      ]);
-    }
-  };
+  const submitChapterGenerate = useCallback(
+    (c: ChapterRow) => {
+      if (!api) return;
+      if (!c.can_generate) {
+        toast(c.generate_disabled_reason || '服务端暂未开放此章节的生成');
+        return;
+      }
+      const confirmThen = () => {
+        api
+          .generateChapter(projectId, c.id)
+          .then(() => toast(`已提交第${c.chapter_number}章生成任务，可在「任务」页看进度`))
+          .catch((e) => toast(friendlyError(e)));
+      };
+      if (c.word_count > 0) {
+        confirm({
+          title: '重新生成正文',
+          message: `第${c.chapter_number}章已有 ${c.word_count} 字正文，重新生成会覆盖当前内容（原文在服务端保留可回滚）。确定提交吗？`,
+          confirmText: '重新生成',
+          destructive: true,
+          onConfirm: confirmThen,
+        });
+      } else {
+        confirm({
+          title: '生成正文',
+          message: `提交第${c.chapter_number}章《${c.title || '未命名'}》的 AI 生成任务？`,
+          confirmText: '提交生成',
+          onConfirm: confirmThen,
+        });
+      }
+    },
+    [api, projectId, confirm, toast],
+  );
 
   /** 提交大纲生成/续写任务（弹窗里的确认按钮） */
   const submitOutlineGenerate = () => {
@@ -164,7 +176,56 @@ export default function ProjectScreen() {
     const call = kind === 'new' ? api.generateOutlines(projectId, count) : api.continueOutlines(projectId, count);
     call
       .then(() => toast(`已提交大纲${kind === 'new' ? '生成' : '续写'}任务（${count} 章）`))
-      .catch((e) => Alert.alert('提交失败', friendlyError(e)));
+      .catch((e) => toast(friendlyError(e)));
+  };
+
+  /** 大纲编辑：从详情切到表单态 */
+  const startOutlineEdit = () => {
+    if (!outlineDetail) return;
+    const kp = outlineDetail.key_points;
+    const kpText = Array.isArray(kp) ? kp.join('\n') : typeof kp === 'string' ? kp : '';
+    setOutlineEdit({
+      title: outlineDetail.title ?? '',
+      summary: typeof outlineDetail.summary === 'string' ? outlineDetail.summary : '',
+      emotion: outlineDetail.emotion ?? '',
+      goal: outlineDetail.goal ?? '',
+      keyPoints: kpText,
+    });
+  };
+
+  /** 大纲编辑：保存（PUT 全量覆盖，未编辑字段原样回传，与网页端同口径） */
+  const saveOutlineEdit = () => {
+    if (!api || !outlineDetail || !outlineEdit) return;
+    setOutlineSaving(true);
+    const title = outlineEdit.title.trim();
+    const summary = outlineEdit.summary.trim();
+    const emotion = outlineEdit.emotion.trim();
+    const goal = outlineEdit.goal.trim();
+    const keyPoints = outlineEdit.keyPoints.split('\n').map((s) => s.trim()).filter(Boolean);
+    api
+      .updateOutline(projectId, outlineDetail.id, {
+        chapter_number: outlineDetail.chapter_number,
+        title,
+        summary,
+        emotion,
+        goal,
+        key_points: keyPoints,
+        scenes: outlineDetail.scenes ?? [],
+        characters: outlineDetail.characters ?? [],
+        organizations: outlineDetail.organizations ?? [],
+        structure: { ...(outlineDetail.structure ?? {}), title, summary, emotion, goal, key_points: keyPoints },
+      })
+      .then(() => {
+        const updated: OutlineItem = { ...outlineDetail, title, summary, emotion, goal, key_points: keyPoints };
+        setOutlineDetail(updated);
+        setOutlines((prev) => (prev ? prev.map((o) => (o.id === updated.id ? updated : o)) : prev));
+        setOutlineEdit(null);
+        toast('大纲已保存');
+        // 服务端保存时会把标题同步到关联章节，刷新一下章节列表
+        load(true);
+      })
+      .catch((e) => toast(friendlyError(e)))
+      .finally(() => setOutlineSaving(false));
   };
 
   /** key_points 兼容两种来源：服务端是 list[str]，网页端手填的可能是换行分隔字符串 */
@@ -176,11 +237,65 @@ export default function ProjectScreen() {
   }, [outlineDetail]);
   const summaryText = typeof outlineDetail?.summary === 'string' ? outlineDetail.summary.trim() : '';
 
+  /** 章节列表元素缓存：打开弹窗/Toast/切分栏等界面态变化不重渲整张章列表 */
+  const chapterList = useMemo(
+    () =>
+      chapters?.map((c) => (
+        <Pressable
+          key={c.id}
+          onPress={() => goReader(c)}
+          style={({ pressed }) => ({
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 12,
+            backgroundColor: c.id === lastRead?.id ? C.goldSoft : pressed ? C.card2 : C.card,
+            borderWidth: 1,
+            borderColor: c.id === lastRead?.id ? 'rgba(229,181,88,0.35)' : C.borderSoft,
+            borderRadius: R.m,
+            paddingHorizontal: 12,
+            paddingVertical: 10,
+          })}
+        >
+          <ChapterBadge number={c.chapter_number} written={c.word_count > 0} />
+          <View style={{ flex: 1, gap: 2 }}>
+            <Text style={{ color: c.word_count > 0 ? C.text : C.text3, fontSize: 14, fontWeight: '600' }} numberOfLines={1}>
+              {c.title || '未命名'}
+            </Text>
+            {c.summary ? (
+              <Text style={{ color: C.text3, fontSize: 11 }} numberOfLines={1}>
+                {c.summary}
+              </Text>
+            ) : null}
+          </View>
+          <Text style={{ color: C.text3, fontSize: 11 }}>{c.word_count > 0 ? `${c.word_count}字` : '未写'}</Text>
+          <Pressable
+            onPress={() => submitChapterGenerate(c)}
+            hitSlop={6}
+            style={{
+              width: 32,
+              height: 32,
+              borderRadius: 11,
+              backgroundColor: c.can_generate ? C.goldSoft : C.card2,
+              borderWidth: 1,
+              borderColor: c.can_generate ? 'rgba(229,181,88,0.35)' : C.borderSoft,
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <Ionicons name="sparkles" size={15} color={c.can_generate ? C.gold : C.text3} />
+          </Pressable>
+          <Ionicons name="chevron-forward" size={14} color={C.text3} />
+        </Pressable>
+      )),
+    [chapters, lastRead, goReader, submitChapterGenerate],
+  );
+
   if (Number.isNaN(projectId)) return null;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: C.bg }} edges={['top']}>
       {toastNode}
+      {confirmNode}
       <ScrollView
         contentContainerStyle={{ flexGrow: 1, padding: SP.l, gap: 14, paddingBottom: 36 }}
         refreshControl={<RefreshControl refreshing={refreshing} tintColor={C.gold} colors={[C.gold]} onRefresh={onRefresh} />}
@@ -260,55 +375,7 @@ export default function ProjectScreen() {
                 ) : chapters.length === 0 ? (
                   <EmptyState icon="list-outline" title="还没有章节" sub="点上方「一键连写」自动生成大纲和正文，或先去大纲分栏补大纲" />
                 ) : (
-                  <View style={{ gap: 8 }}>
-                  {chapters.map((c) => (
-                    <Pressable
-                      key={c.id}
-                      onPress={() => goReader(c)}
-                      style={({ pressed }) => ({
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                        gap: 12,
-                        backgroundColor: c.id === lastRead?.id ? C.goldSoft : pressed ? C.card2 : C.card,
-                        borderWidth: 1,
-                        borderColor: c.id === lastRead?.id ? 'rgba(229,181,88,0.35)' : C.borderSoft,
-                        borderRadius: R.m,
-                        paddingHorizontal: 12,
-                        paddingVertical: 10,
-                      })}
-                    >
-                      <ChapterBadge number={c.chapter_number} written={c.word_count > 0} />
-                      <View style={{ flex: 1, gap: 2 }}>
-                        <Text style={{ color: c.word_count > 0 ? C.text : C.text3, fontSize: 14, fontWeight: '600' }} numberOfLines={1}>
-                          {c.title || '未命名'}
-                        </Text>
-                        {c.summary ? (
-                          <Text style={{ color: C.text3, fontSize: 11 }} numberOfLines={1}>
-                            {c.summary}
-                          </Text>
-                        ) : null}
-                      </View>
-                      <Text style={{ color: C.text3, fontSize: 11 }}>{c.word_count > 0 ? `${c.word_count}字` : '未写'}</Text>
-                      <Pressable
-                        onPress={() => submitChapterGenerate(c)}
-                        hitSlop={6}
-                        style={{
-                          width: 32,
-                          height: 32,
-                          borderRadius: 11,
-                          backgroundColor: c.can_generate ? C.goldSoft : C.card2,
-                          borderWidth: 1,
-                          borderColor: c.can_generate ? 'rgba(229,181,88,0.35)' : C.borderSoft,
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                        }}
-                      >
-                        <Ionicons name="sparkles" size={15} color={c.can_generate ? C.gold : C.text3} />
-                      </Pressable>
-                      <Ionicons name="chevron-forward" size={14} color={C.text3} />
-                    </Pressable>
-                  ))}
-                  </View>
+                  <View style={{ gap: 8 }}>{chapterList}</View>
                 )}
               </>
             ) : null}
@@ -413,10 +480,60 @@ export default function ProjectScreen() {
         ) : null}
       </ScrollView>
 
-      {/* 大纲详情 */}
-      <SheetModal visible={outlineDetail !== null} onClose={() => setOutlineDetail(null)} title={`第${outlineDetail?.chapter_number ?? '—'}章 · ${outlineDetail?.title || '未命名'}`}>
+      {/* 大纲详情 / 编辑 */}
+      <SheetModal
+        visible={outlineDetail !== null}
+        onClose={() => {
+          setOutlineDetail(null);
+          setOutlineEdit(null);
+        }}
+        title={`第${outlineDetail?.chapter_number ?? '—'}章 · ${outlineDetail?.title || '未命名'}`}
+      >
         {outlineDetail ? (
-          <View style={{ gap: 12 }}>
+          outlineEdit ? (
+            <View style={{ gap: 12 }}>
+              <View style={{ gap: 7 }}>
+                <FieldLabel>标题</FieldLabel>
+                <Input value={outlineEdit.title} onChangeText={(v) => setOutlineEdit((f) => (f ? { ...f, title: v } : f))} placeholder="本章标题" />
+              </View>
+              <View style={{ flexDirection: 'row', gap: 10 }}>
+                <View style={{ flex: 1, gap: 7 }}>
+                  <FieldLabel>情绪</FieldLabel>
+                  <Input value={outlineEdit.emotion} onChangeText={(v) => setOutlineEdit((f) => (f ? { ...f, emotion: v } : f))} placeholder="如：压抑" />
+                </View>
+                <View style={{ flex: 1, gap: 7 }}>
+                  <FieldLabel>本章目标</FieldLabel>
+                  <Input value={outlineEdit.goal} onChangeText={(v) => setOutlineEdit((f) => (f ? { ...f, goal: v } : f))} placeholder="如：引出反派" />
+                </View>
+              </View>
+              <View style={{ gap: 7 }}>
+                <FieldLabel>本章摘要</FieldLabel>
+                <Input value={outlineEdit.summary} onChangeText={(v) => setOutlineEdit((f) => (f ? { ...f, summary: v } : f))} placeholder="本章讲什么" multiline height={110} />
+              </View>
+              <View style={{ gap: 7 }}>
+                <FieldLabel>关键要点（每行一条）</FieldLabel>
+                <Input value={outlineEdit.keyPoints} onChangeText={(v) => setOutlineEdit((f) => (f ? { ...f, keyPoints: v } : f))} placeholder={'主角发现线索\n与反派正面冲突'} multiline height={130} />
+              </View>
+              <View style={{ flexDirection: 'row', gap: 10, marginTop: 2 }}>
+                <Pressable
+                  onPress={() => setOutlineEdit(null)}
+                  disabled={outlineSaving}
+                  style={{ flex: 1, height: 44, borderRadius: R.m, backgroundColor: C.card2, borderWidth: 1, borderColor: C.border, alignItems: 'center', justifyContent: 'center' }}
+                >
+                  <Text style={{ color: C.text2, fontSize: 14, fontWeight: '600' }}>取消</Text>
+                </Pressable>
+                <Pressable
+                  onPress={saveOutlineEdit}
+                  disabled={outlineSaving}
+                  style={{ flex: 1.6, height: 44, borderRadius: R.m, backgroundColor: C.gold, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 7 }}
+                >
+                  {outlineSaving ? <ActivityIndicator size="small" color="#1A1206" /> : <Ionicons name="checkmark" size={16} color="#1A1206" />}
+                  <Text style={{ color: '#1A1206', fontSize: 14.5, fontWeight: '800' }}>{outlineSaving ? '保存中…' : '保存大纲'}</Text>
+                </Pressable>
+              </View>
+            </View>
+          ) : (
+            <View style={{ gap: 12 }}>
             {(outlineDetail.emotion || outlineDetail.goal) && (
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                 {outlineDetail.emotion ? <Chip label={`情绪 · ${outlineDetail.emotion}`} fg={C.gold} bg={C.goldSoft} /> : null}
@@ -445,7 +562,25 @@ export default function ProjectScreen() {
                 这章大纲没有填摘要和要点
               </Text>
             ) : null}
-          </View>
+            <Pressable
+              onPress={startOutlineEdit}
+              style={({ pressed }) => ({
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 7,
+                height: 42,
+                borderRadius: R.m,
+                backgroundColor: pressed ? '#3A2F16' : C.goldSoft,
+                borderWidth: 1,
+                borderColor: 'rgba(229,181,88,0.4)',
+              })}
+            >
+              <Ionicons name="create-outline" size={15} color={C.gold} />
+              <Text style={{ color: C.gold, fontSize: 13.5, fontWeight: '700' }}>编辑大纲</Text>
+            </Pressable>
+            </View>
+          )
         ) : null}
       </SheetModal>
 

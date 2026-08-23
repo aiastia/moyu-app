@@ -80,6 +80,11 @@ export interface OutlineItem {
   goal?: string | null;
   /** 服务端是 JSON 数组（list[str]）；历史数据/网页端手填的可能是换行分隔字符串，两种都兼容 */
   key_points?: string[] | string | null;
+  /** 服务端全量字段，编辑保存时需原样回传（PUT 是全量覆盖语义，漏传会被默认空值清掉） */
+  scenes?: unknown[] | null;
+  characters?: unknown[] | null;
+  organizations?: unknown[] | null;
+  structure?: Record<string, unknown> | null;
 }
 
 export interface CharacterItem {
@@ -297,6 +302,30 @@ export class Api {
 
   getOutlines(projectId: number) {
     return this.req<OutlineItem[]>(`/api/projects/${projectId}/outlines`);
+  }
+
+  /** 更新大纲。服务端 PUT 按 OutlineCreate 全量覆盖：scenes/characters/structure 等
+   *  未编辑字段必须原样回传，否则会被空默认值清掉（网页端 onSave 同一口径）。 */
+  updateOutline(
+    projectId: number,
+    outlineId: number,
+    body: {
+      chapter_number: number;
+      title?: string;
+      summary?: string;
+      emotion?: string;
+      goal?: string;
+      key_points?: string[];
+      scenes?: unknown[];
+      characters?: unknown[];
+      organizations?: unknown[];
+      structure?: Record<string, unknown>;
+    },
+  ) {
+    return this.req<{ ok: boolean }>(`/api/projects/${projectId}/outlines/${outlineId}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    });
   }
 
   getCharacters(projectId: number) {
