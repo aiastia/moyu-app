@@ -12,7 +12,28 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # main 日常推送只做类型检查；全量 APK 构建只在打 tag / 手动触发时跑。
+  # 此前 main 和 tag 各编一次完整 APK（双倍时间），且两次并发构建会互相挤占
+  # gradle/NDK 缓存写入，日常 push 从 ~10 分钟降到 ~2 分钟。
+  ci:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Type check
+        run: npx tsc --noEmit
+
   build:
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -24,6 +45,18 @@ jobs:
           node-version: '22'
           cache: npm
 
+      # node_modules 缓存：命中则跳过 npm ci（省 1-2 分钟；lock 变了自动重装）
+      - name: Restore node_modules
+        id: nmod
+        uses: actions/cache@v6
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Install dependencies
+        if: steps.nmod.outputs.cache-hit != 'true'
+        run: npm ci --no-audit --no-fund
+
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
@@ -31,37 +64,52 @@ jobs:
 
       - uses: android-actions/setup-android@v4
 
-      - name: Install dependencies
-        run: npm ci
-
       - name: Type check
         run: npx tsc --noEmit
 
       - name: Prebuild android project
         run: npx expo prebuild -p android --no-install
 
-      # Gradle 编译缓存：必须在 prebuild 之后（此时 android/ 已生成才能算缓存key）
+      # NDK 缓存：gradle 首次构建会下载约 1GB 的 NDK 并解压（3-5 分钟），
+      # 不在 ~/.gradle 里、每次都重新来。key 绑 package-lock：expo/RN 升级
+      # → ndkVersion 变 → 新 key，不会错配。
+      - name: NDK cache
+        uses: actions/cache@v6
+        with:
+          path: /usr/local/lib/android/sdk/ndk
+          key: ndk-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      # Gradle 缓存：必须在 prebuild 之后（此时 android/ 已生成才能算缓存key）。
+      # key 不含 github.sha——原设计精确 key 永远 miss、每 run 再保存 2-4GB，
+      # 10GB 配额下旧缓存被挤掉、命中率不稳。改为内容 key 精确命中；
+      # ~/.gradle/caches 内含 build-cache-1，配合 org.gradle.caching=true 可
+      # 跨构建复用 Kotlin/Hermes 等任务编译结果（省 2-4 分钟）。
       - name: Gradle cache
         uses: actions/cache@v6
         with:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: gradle-${{ runner.os }}-${{ hashFiles('android/gradle/wrapper/gradle-wrapper.properties', 'package-lock.json') }}-${{ github.sha }}
+          key: gradle-${{ runner.os }}-${{ hashFiles('android/gradle/wrapper/gradle-wrapper.properties', 'package-lock.json') }}
           restore-keys: |
-            gradle-${{ runner.os }}-${{ hashFiles('android/gradle/wrapper/gradle-wrapper.properties', 'package-lock.json') }}-
+            gradle-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-
             gradle-${{ runner.os }}-
 
       - name: Apply release signing
         run: node scripts/apply-signing.js
 
-      - name: Tune gradle memory
+      - name: Tune gradle
         run: |
-          if grep -q '^org.gradle.jvmargs=' android/gradle.properties; then
-            sed -i 's/^org.gradle.jvmargs=.*/org.gradle.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=1g/' android/gradle.properties
-          else
-            echo 'org.gradle.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=1g' >> android/gradle.properties
-          fi
+          set_prop() {
+            if grep -q "^$1=" android/gradle.properties; then
+              sed -i "s/^$1=.*/$1=$2/" android/gradle.properties
+            else
+              echo "$1=$2" >> android/gradle.properties
+            fi
+          }
+          set_prop org.gradle.jvmargs "-Xmx6g -XX:MaxMetaspaceSize=1g"
+          set_prop org.gradle.caching true
+          set_prop org.gradle.parallel true
           cat android/gradle.properties
 
       - name: Build release APK
