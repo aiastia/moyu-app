@@ -61,7 +61,7 @@ npm run icons           # 修改 assets-src/*.svg 后重新渲染各尺寸图标
 
 ## 关于签名
 
-仓库内置了用于本地分发的签名密钥 `moyu-release.jks`（密码 `moyu2026`），保证每次构建的 APK 签名一致、可直接覆盖升级。这是面向自托管社区的分发约定：本应用不上架应用商店、不申请敏感权限（仅联网），泄露密钥的后果仅限于他人可以构建同签名的本应用安装包。若要发布你自己的正式版，请替换为自己的 keystore 并在 Actions secrets 中配置 `MOYU_KEYSTORE_PASSWORD`。
+签名材料只存放在 GitHub Actions secrets 中（仓库不携带 keystore 与密码），构建时由 `scripts/apply-signing.js` 解码注入，保证每次 APK 签名一致、可直接覆盖升级。需要自行构建正式签名包时，在仓库 Settings → Secrets and variables → Actions 配置三项：`MOYU_KEYSTORE_BASE64`（keystore 文件的 base64，`base64 < your.jks` 生成）、`MOYU_KEYSTORE_PASSWORD`、`MOYU_KEYSTORE_ALIAS`；未配置时构建自动回落 debug 签名。
 
 ## 许可
 

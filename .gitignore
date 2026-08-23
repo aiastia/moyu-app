@@ -44,3 +44,7 @@ example
 
 # Mimosa 扫描钩子的会话状态（运行时产物）
 .mimosa/
+
+# expo prebuild 本地产物不入库（CI 每次重新 prebuild）
+android/
+ios/

@@ -97,6 +97,10 @@ jobs:
 
       - name: Apply release signing
         run: node scripts/apply-signing.js
+        env:
+          MOYU_KEYSTORE_BASE64: ${{ secrets.MOYU_KEYSTORE_BASE64 }}
+          MOYU_KEYSTORE_PASSWORD: ${{ secrets.MOYU_KEYSTORE_PASSWORD }}
+          MOYU_KEYSTORE_ALIAS: ${{ secrets.MOYU_KEYSTORE_ALIAS }}
 
       - name: Tune gradle
         run: |

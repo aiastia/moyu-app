@@ -1,23 +1,24 @@
 /**
  * expo prebuild 之后、gradle 构建之前执行：
- * 把仓库根目录的 moyu-release.jks 注入 android/app/build.gradle 的 release 签名配置。
- * 没有 keystore 时（如 fork 构建）自动跳过，保持默认 debug 签名。
+ * 用 GitHub Actions secrets（MOYU_KEYSTORE_BASE64 / MOYU_KEYSTORE_PASSWORD / MOYU_KEYSTORE_ALIAS）
+ * 注入 android/app/build.gradle 的 release 签名配置。
+ * 签名材料不入库——仓库不携带 keystore 文件与密码（历史版本曾内置明文，已迁移到 secrets）。
+ * fork / 未配置 secrets 时自动跳过，保持默认 debug 签名。
  */
 const fs = require('fs');
 const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
 const GRADLE = path.join(ROOT, 'android', 'app', 'build.gradle');
-const KEYSTORE = path.join(ROOT, 'moyu-release.jks');
+const KEYSTORE_OUT = path.join(ROOT, 'android', 'app', 'moyu-release.jks');
+
+const BASE64 = process.env.MOYU_KEYSTORE_BASE64 || '';
+const PASSWORD = process.env.MOYU_KEYSTORE_PASSWORD || '';
+const ALIAS = process.env.MOYU_KEYSTORE_ALIAS || 'moyu';
 
 if (!fs.existsSync(GRADLE)) {
   console.error('android/app/build.gradle not found — run `npx expo prebuild -p android` first');
   process.exit(1);
-}
-
-if (!fs.existsSync(KEYSTORE)) {
-  console.log('moyu-release.jks not found — keep default debug signing');
-  process.exit(0);
 }
 
 let g = fs.readFileSync(GRADLE, 'utf8');
@@ -26,23 +27,30 @@ if (g.includes('moyu-release.jks')) {
   process.exit(0);
 }
 
-const PASSWORD = process.env.MOYU_KEYSTORE_PASSWORD || 'moyu2026';
+if (!BASE64 || !PASSWORD) {
+  console.log('MOYU_KEYSTORE_BASE64 / MOYU_KEYSTORE_PASSWORD not set — keep default debug signing');
+  process.exit(0);
+}
+
+fs.writeFileSync(KEYSTORE_OUT, Buffer.from(BASE64, 'base64'));
+
 const block = `
     signingConfigs {
         release {
-            storeFile file('../../moyu-release.jks')
+            storeFile file('moyu-release.jks')
             storePassword '${PASSWORD}'
-            keyAlias 'moyu'
+            keyAlias '${ALIAS}'
             keyPassword '${PASSWORD}'
             storeType 'pkcs12'
         }
     }
-    // ABI 拆分瘦身：只出 arm64-v8a / armeabi-v7a 两个 APK（覆盖绝大多数真机），不出 173MB 的全架构包
+    // ABI 拆分瘦身：只出 arm64-v8a 单包。include 列表必须与 gradle.properties 的
+    // reactNativeArchitectures 一致——编译了哪些 ABI 就拆哪些，不一致会产出缺原生库的坏包
     splits {
         abi {
             enable true
             reset()
-            include 'arm64-v8a', 'armeabi-v7a'
+            include 'arm64-v8a'
             universalApk false
         }
     }
@@ -75,4 +83,4 @@ if (g.includes('signingConfig signingConfigs.debug')) {
 }
 
 fs.writeFileSync(GRADLE, g);
-console.log('release signing applied (keystore: moyu-release.jks)');
+console.log('release signing applied (keystore decoded from MOYU_KEYSTORE_BASE64)');
