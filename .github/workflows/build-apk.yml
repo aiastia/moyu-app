@@ -1,0 +1,63 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npx tsc --noEmit
+
+      - name: Prebuild android project
+        run: npx expo prebuild -p android --no-install
+
+      - name: Apply release signing
+        run: node scripts/apply-signing.js
+
+      - name: Build release APK
+        working-directory: android
+        run: ./gradlew assembleRelease --stacktrace
+
+      - name: Collect APK
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          mkdir -p dist
+          cp android/app/build/outputs/apk/release/app-release.apk "dist/moyu-writer-v${VERSION}.apk"
+          ls -la dist/
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: moyu-writer-apk
+          path: dist/*.apk
+
+      - name: Create release with APK
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.apk
+          generate_release_notes: true
