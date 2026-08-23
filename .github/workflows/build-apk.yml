@@ -53,7 +53,7 @@ jobs:
 
       - name: Collect APK
         run: |
-          VERSION=$(node -p "require('./package.json').version")
+          VERSION=$(node -p "require('./app.json').expo.version")
           mkdir -p dist
           cp android/app/build/outputs/apk/release/app-release.apk "dist/moyu-writer-v${VERSION}.apk"
           ls -la dist/
