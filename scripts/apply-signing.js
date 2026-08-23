@@ -55,6 +55,18 @@ if (replaced === g) {
 }
 g = replaced;
 
+// 开启构建缓存与并行编译（配合 CI 的 gradle cache 复用，重复构建提速）
+const gp = path.join(ROOT, 'android', 'gradle.properties');
+if (fs.existsSync(gp)) {
+  let props = fs.readFileSync(gp, 'utf8');
+  for (const line of ['org.gradle.caching=true', 'org.gradle.parallel=true']) {
+    const key = line.split('=')[0];
+    if (!props.includes(key)) props += `\n${line}`;
+  }
+  fs.writeFileSync(gp, props.endsWith('\n') ? props : `${props}\n`);
+  console.log('gradle caching/parallel enabled');
+}
+
 if (g.includes('signingConfig signingConfigs.debug')) {
   g = g.replace('signingConfig signingConfigs.debug', 'signingConfig signingConfigs.release');
   console.log('buildTypes release -> signingConfigs.release');
