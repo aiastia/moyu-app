@@ -37,6 +37,15 @@ const block = `
             storeType 'pkcs12'
         }
     }
+    // ABI 拆分瘦身：只出 arm64-v8a / armeabi-v7a 两个 APK（覆盖绝大多数真机），不出 173MB 的全架构包
+    splits {
+        abi {
+            enable true
+            reset()
+            include 'arm64-v8a', 'armeabi-v7a'
+            universalApk false
+        }
+    }
 `;
 
 const replaced = g.replace(/^android\s*\{/m, (m) => `${m}\n${block}`);

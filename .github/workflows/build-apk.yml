@@ -55,7 +55,16 @@ jobs:
         run: |
           VERSION=$(node -p "require('./app.json').expo.version")
           mkdir -p dist
-          cp android/app/build/outputs/apk/release/app-release.apk "dist/moyu-writer-v${VERSION}.apk"
+          for f in android/app/build/outputs/apk/release/*.apk; do
+            base=$(basename "$f" .apk)
+            if [ "$base" = "app-release" ]; then
+              cp "$f" "dist/moyu-writer-v${VERSION}.apk"
+            else
+              abi=${base#app-}
+              abi=${abi%-release}
+              cp "$f" "dist/moyu-writer-v${VERSION}-${abi}.apk"
+            fi
+          done
           ls -la dist/
 
       - name: Upload APK artifact

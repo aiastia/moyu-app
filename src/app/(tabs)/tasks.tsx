@@ -1,10 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
+import { Alert, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { Chip, EmptyState, ProgressBar, ScreenHeader, Skeleton } from '@/components/ui';
+import { Chip, EmptyState, ProgressBar, ScreenHeader, Skeleton, useToast } from '@/components/ui';
 import type { TaskItem } from '@/lib/api';
 import { ApiError } from '@/lib/api';
 import { friendlyError, useAuth } from '@/lib/auth';
@@ -34,7 +34,17 @@ function statusStyle(status: string): { fg: string; bg: string } {
   }
 }
 
-function TaskCard({ task }: { task: TaskItem }) {
+function TaskCard({
+  task,
+  onCancel,
+  onRetry,
+  onDelete,
+}: {
+  task: TaskItem;
+  onCancel: (t: TaskItem) => void;
+  onRetry: (t: TaskItem) => void;
+  onDelete: (t: TaskItem) => void;
+}) {
   const s = statusStyle(task.status);
   const active = task.status === 'running' || task.status === 'pending';
   return (
@@ -69,15 +79,42 @@ function TaskCard({ task }: { task: TaskItem }) {
           {task.error}
         </Text>
       ) : null}
-      {active ? <ProgressBar pct={task.progress ?? 0} color={C.blue} /> : task.status === 'completed' ? <ProgressBar pct={100} color={C.green} /> : null}
+      {task.status === 'running' ? <ProgressBar pct={task.progress ?? 0} color={C.blue} /> : task.status === 'pending' ? <ProgressBar pct={task.progress ?? 0} color={C.text3} /> : task.status === 'completed' ? <ProgressBar pct={100} color={C.green} /> : null}
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
         <Text style={{ color: C.text3, fontSize: 11, flex: 1 }} numberOfLines={1}>
           {task.created_at ? fmtRelative(task.created_at) : ''}
           {active && task.progress ? ` · ${task.progress}%` : ''}
         </Text>
+        {active && !task.cancel_requested ? (
+          <Pressable
+            onPress={() => onCancel(task)}
+            hitSlop={6}
+            style={{ paddingHorizontal: 11, height: 30, borderRadius: 10, backgroundColor: C.card2, borderWidth: 1, borderColor: C.border, alignItems: 'center', justifyContent: 'center' }}
+          >
+            <Text style={{ color: C.text2, fontSize: 12, fontWeight: '600' }}>取消</Text>
+          </Pressable>
+        ) : null}
+        {task.status === 'failed' ? (
+          <Pressable
+            onPress={() => onRetry(task)}
+            hitSlop={6}
+            style={{ paddingHorizontal: 11, height: 30, borderRadius: 10, backgroundColor: C.goldSoft, borderWidth: 1, borderColor: 'rgba(229,181,88,0.4)', alignItems: 'center', justifyContent: 'center' }}
+          >
+            <Text style={{ color: C.gold, fontSize: 12, fontWeight: '700' }}>重试</Text>
+          </Pressable>
+        ) : null}
+        {!active ? (
+          <Pressable
+            onPress={() => onDelete(task)}
+            hitSlop={6}
+            style={{ paddingHorizontal: 11, height: 30, borderRadius: 10, backgroundColor: C.card2, borderWidth: 1, borderColor: C.border, alignItems: 'center', justifyContent: 'center' }}
+          >
+            <Text style={{ color: C.text3, fontSize: 12, fontWeight: '600' }}>删除</Text>
+          </Pressable>
+        ) : null}
         {task.project_id ? (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
-            <Text style={{ color: C.gold, fontSize: 11 }}>查看项目</Text>
+            <Text style={{ color: C.gold, fontSize: 11 }}>项目</Text>
             <Ionicons name="chevron-forward" size={11} color={C.gold} />
           </View>
         ) : null}
@@ -92,6 +129,7 @@ export default function TasksScreen() {
   const [filter, setFilter] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
+  const [toast, toastNode] = useToast();
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const load = useCallback(
@@ -136,10 +174,88 @@ export default function TasksScreen() {
     setRefreshing(false);
   }, [load]);
 
+  const doCancel = (t: TaskItem) => {
+    if (!api) return;
+    Alert.alert('取消任务', `确定取消「${t.title || t.task_type}」？正在进行的 AI 调用会跑完当前步骤后停止。`, [
+      { text: '返回', style: 'cancel' },
+      {
+        text: '取消任务',
+        style: 'destructive',
+        onPress: () =>
+          api
+            .cancelTask(t.id)
+            .then(() => {
+              toast('已请求取消');
+              load(true);
+            })
+            .catch((e) => toast(friendlyError(e))),
+      },
+    ]);
+  };
+
+  const doRetry = (t: TaskItem) => {
+    if (!api) return;
+    api
+      .retryTask(t.id)
+      .then((r) => {
+        toast(`已重新提交（新任务 #${r.task_id}）`);
+        load(true);
+      })
+      .catch((e) => toast(friendlyError(e)));
+  };
+
+  const doDelete = (t: TaskItem) => {
+    if (!api) return;
+    Alert.alert('删除记录', '只删除这条任务记录，不影响已生成的正文。', [
+      { text: '取消', style: 'cancel' },
+      {
+        text: '删除',
+        style: 'destructive',
+        onPress: () =>
+          api
+            .deleteTask(t.id)
+            .then(() => load(true))
+            .catch((e) => toast(friendlyError(e))),
+      },
+    ]);
+  };
+
+  const doClearCompleted = () => {
+    if (!api) return;
+    Alert.alert('清空已完成', '删除所有已完成/已取消/失败的任务记录？', [
+      { text: '取消', style: 'cancel' },
+      {
+        text: '清空',
+        style: 'destructive',
+        onPress: () =>
+          api
+            .clearCompletedTasks()
+            .then((r) => {
+              toast(`已清理 ${r.deleted} 条`);
+              load(true);
+            })
+            .catch((e) => toast(friendlyError(e))),
+      },
+    ]);
+  };
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: C.bg }} edges={['top']}>
+      {toastNode}
       <View style={{ paddingHorizontal: SP.l, paddingTop: 10, gap: 14, flex: 1 }}>
-        <ScreenHeader title="任务" subtitle="AI 生成任务的实时进度" />
+        <ScreenHeader
+          title="任务"
+          subtitle="AI 生成任务的实时进度"
+          right={
+            <Pressable
+              onPress={doClearCompleted}
+              hitSlop={6}
+              style={{ paddingHorizontal: 13, height: 34, borderRadius: 11, backgroundColor: C.card, borderWidth: 1, borderColor: C.borderSoft, alignItems: 'center', justifyContent: 'center' }}
+            >
+              <Text style={{ color: C.text2, fontSize: 12, fontWeight: '600' }}>清空已完成</Text>
+            </Pressable>
+          }
+        />
 
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
           {FILTERS.map((f) => {
@@ -177,7 +293,7 @@ export default function TasksScreen() {
             refreshControl={<RefreshControl refreshing={refreshing} tintColor={C.gold} colors={[C.gold]} onRefresh={onRefresh} />}
           >
             {tasks?.length ? (
-              tasks.map((t) => <TaskCard key={t.id} task={t} />)
+              tasks.map((t) => <TaskCard key={t.id} task={t} onCancel={doCancel} onRetry={doRetry} onDelete={doDelete} />)
             ) : (
               <EmptyState icon="flash-outline" title="暂无任务" sub="在网页端发起章节生成、润色等操作后，可以在这里盯进度" />
             )}

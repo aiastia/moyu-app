@@ -6,8 +6,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ChapterBadge, Chip, EmptyState, ProgressBar, ScreenHeader, SegmentedTabs, Skeleton, useToast } from '@/components/ui';
 import { ForeshadowsPanel } from '@/components/ForeshadowsPanel';
+import { CharactersPanel } from '@/components/CharactersPanel';
 import { WorldsPanel } from '@/components/WorldsPanel';
-import type { ChapterRow, CharacterItem, OutlineItem, ProjectDetail } from '@/lib/api';
+import type { ChapterRow, OutlineItem, ProjectDetail } from '@/lib/api';
 import { ApiError } from '@/lib/api';
 import { friendlyError, loadLastRead, useAuth } from '@/lib/auth';
 import { fmtPercent, fmtRelative, fmtWords, STORY_KIND_LABEL } from '@/lib/format';
@@ -42,7 +43,6 @@ export default function ProjectScreen() {
   const [project, setProject] = useState<ProjectDetail | null>(null);
   const [chapters, setChapters] = useState<ChapterRow[] | null>(null);
   const [outlines, setOutlines] = useState<OutlineItem[] | null>(null);
-  const [characters, setCharacters] = useState<CharacterItem[] | null>(null);
   const [lastRead, setLastRead] = useState<ChapterRow | null>(null);
   const [tab, setTab] = useState<TabKey>('chapters');
   const [refreshing, setRefreshing] = useState(false);
@@ -97,10 +97,7 @@ export default function ProjectScreen() {
     if (tab === 'outlines' && outlines === null) {
       api.getOutlines(projectId).then((o) => setOutlines(o ?? [])).catch(guard);
     }
-    if (tab === 'characters' && characters === null) {
-      api.getCharacters(projectId).then((c) => setCharacters(c ?? [])).catch(guard);
-    }
-  }, [tab, api, projectId, outlines, characters, guard]);
+  }, [tab, api, projectId, outlines, guard]);
 
   const pct = useMemo(() => fmtPercent(project?.current_word_count, project?.target_word_count), [project]);
 
@@ -355,33 +352,7 @@ export default function ProjectScreen() {
             ) : null}
 
             {tab === 'characters' ? (
-              characters === null ? (
-                <Skeleton count={4} height={76} />
-              ) : characters.length === 0 ? (
-                <EmptyState icon="people-outline" title="暂无角色" />
-              ) : (
-                <View style={{ gap: 8 }}>
-                  {characters.map((c) => (
-                    <View key={c.id} style={{ backgroundColor: C.card, borderWidth: 1, borderColor: C.borderSoft, borderRadius: R.m, padding: 13, gap: 7 }}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                        <Text style={{ color: C.text, fontSize: 14.5, fontWeight: '800' }}>{c.name}</Text>
-                        {c.role ? <Chip label={c.role} fg={C.purple} bg={C.purpleSoft} /> : null}
-                        {c.gender ? <Chip label={c.gender} /> : null}
-                      </View>
-                      {c.identity ? (
-                        <Text style={{ color: C.text2, fontSize: 12 }} numberOfLines={1}>
-                          {c.identity}
-                        </Text>
-                      ) : null}
-                      {c.personality ? (
-                        <Text style={{ color: C.text3, fontSize: 11.5, lineHeight: 17 }} numberOfLines={2}>
-                          {c.personality}
-                        </Text>
-                      ) : null}
-                    </View>
-                  ))}
-                </View>
-              )
+              <CharactersPanel projectId={projectId} />
             ) : null}
 
             {tab === 'world' ? <WorldsPanel projectId={projectId} /> : null}

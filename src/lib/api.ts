@@ -84,10 +84,15 @@ export interface CharacterItem {
   name: string;
   role: string;
   gender?: string | null;
+  age?: string | null;
   identity?: string | null;
   appearance?: string | null;
   personality?: string | null;
   background?: string | null;
+  ability?: string | null;
+  story_goal?: string | null;
+  motivation?: string | null;
+  weakness?: string | null;
   status?: string | null;
 }
 
@@ -99,6 +104,7 @@ export interface TaskItem {
   status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'cancelling' | string;
   progress: number;
   status_message?: string | null;
+  cancel_requested?: boolean;
   error?: string | null;
   created_at?: string | null;
   completed_at?: string | null;
@@ -142,6 +148,23 @@ export interface CreateProjectBody {
   story_kind?: string;
   pen_name?: string;
   target_platform?: string;
+}
+
+export interface CharacterBody {
+  name: string;
+  role?: string;
+  gender?: string;
+  age?: string;
+  identity?: string;
+  appearance?: string;
+  personality?: string;
+  background?: string;
+  ability?: string;
+  story_goal?: string;
+  motivation?: string;
+  weakness?: string;
+  speech_style?: string;
+  status?: string;
 }
 
 export interface ForeshadowBody {
@@ -280,6 +303,38 @@ export class Api {
 
   cancelTask(taskId: number) {
     return this.req<unknown>(`/api/tasks/${taskId}/cancel`, { method: 'POST' });
+  }
+
+  /** 重试失败任务，返回新任务 id */
+  retryTask(taskId: number) {
+    return this.req<{ task_id: number }>(`/api/tasks/${taskId}/retry`, { method: 'POST' });
+  }
+
+  deleteTask(taskId: number) {
+    return this.req<unknown>(`/api/tasks/${taskId}`, { method: 'DELETE' });
+  }
+
+  clearCompletedTasks() {
+    return this.req<{ ok: boolean; deleted: number }>(`/api/tasks/clear-completed`, { method: 'POST' });
+  }
+
+  // ===== 角色 =====
+  createCharacter(projectId: number, body: CharacterBody) {
+    return this.req<{ id: number }>(`/api/projects/${projectId}/characters`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
+  updateCharacter(projectId: number, characterId: number, body: Partial<CharacterBody>) {
+    return this.req<unknown>(`/api/projects/${projectId}/characters/${characterId}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    });
+  }
+
+  deleteCharacter(projectId: number, characterId: number) {
+    return this.req<unknown>(`/api/projects/${projectId}/characters/${characterId}`, { method: 'DELETE' });
   }
 
   /** 提交单章正文生成（异步任务，返回 task_id） */
