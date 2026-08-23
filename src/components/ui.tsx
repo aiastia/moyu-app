@@ -1,8 +1,34 @@
 import { Ionicons } from '@expo/vector-icons';
-import React, { useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Animated, Pressable, Text, View, type ViewStyle } from 'react-native';
 
 import { C, R } from '@/lib/theme';
+
+/** 轻提示 Toast（useToast 的展示件） */
+function ToastView({ message }: { message: string }) {
+  return (
+    <View pointerEvents="none" style={{ position: 'absolute', left: 0, right: 0, bottom: 96, alignItems: 'center', zIndex: 99 }}>
+      <View style={{ backgroundColor: 'rgba(22,26,40,0.97)', borderWidth: 1, borderColor: C.border, borderRadius: 12, paddingHorizontal: 18, paddingVertical: 11, maxWidth: 320 }}>
+        <Text style={{ color: C.text, fontSize: 13, lineHeight: 18, textAlign: 'center' }}>{message}</Text>
+      </View>
+    </View>
+  );
+}
+
+/** 返回 [show函数, 挂载节点]；节点放在屏幕根 View 内 */
+export function useToast(): [(msg: string) => void, ReactNode] {
+  const [msg, setMsg] = useState('');
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const show = useCallback((m: string) => {
+    setMsg(m);
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => setMsg(''), 2400);
+  }, []);
+  useEffect(() => () => {
+    if (timer.current) clearTimeout(timer.current);
+  }, []);
+  return [show, msg ? <ToastView message={msg} /> : null];
+}
 
 /** 小标签 */
 export function Chip({ label, fg = C.text2, bg = C.card2, bold = false }: { label: string; fg?: string; bg?: string; bold?: boolean }) {

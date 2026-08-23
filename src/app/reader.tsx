@@ -8,11 +8,17 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { ChapterFull, ChapterNav } from '@/lib/api';
 import { ApiError } from '@/lib/api';
 import { friendlyError, loadReaderPrefs, saveLastRead, saveReaderPrefs, useAuth } from '@/lib/auth';
+import { useToast } from '@/components/ui';
 import { getChapterVersion } from '@/lib/version';
 import { C, DEFAULT_READER_PREFS, READER_THEMES, type ReaderPrefs } from '@/lib/theme';
 
 export default function ReaderScreen() {
-  const { projectId: pid, chapterId: cid } = useLocalSearchParams<{ projectId: string; chapterId: string }>();
+  const { projectId: pid, chapterId: cid, canGenerate, reason } = useLocalSearchParams<{
+    projectId: string;
+    chapterId: string;
+    canGenerate?: string;
+    reason?: string;
+  }>();
   const projectId = Number(pid);
   const chapterId = Number(cid);
   const { api, logout } = useAuth();
@@ -23,6 +29,9 @@ export default function ReaderScreen() {
   const [error, setError] = useState('');
   const [prefs, setPrefs] = useState<ReaderPrefs>(DEFAULT_READER_PREFS);
   const [panelOpen, setPanelOpen] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [toast, toastNode] = useToast();
   const scrollRef = useRef<ScrollView>(null);
   const loadedVersion = useRef(0);
 
@@ -86,12 +95,31 @@ export default function ReaderScreen() {
     router.replace({ pathname: '/reader', params: { projectId: String(projectId), chapterId: String(id) } });
   };
 
+  /** 空章一键生成 */
+  const generateHere = () => {
+    if (!api || submitting || submitted) return;
+    if (canGenerate !== '1') {
+      toast(reason || '本章暂不能生成，请先在网页端准备大纲');
+      return;
+    }
+    setSubmitting(true);
+    api
+      .generateChapter(projectId, chapterId)
+      .then(() => {
+        setSubmitted(true);
+        toast('已提交生成任务，完成后回来下拉即可看到正文');
+      })
+      .catch((e) => toast(friendlyError(e)))
+      .finally(() => setSubmitting(false));
+  };
+
   const paragraphs = useMemo(() => (chapter?.content ? chapter.content.split(/\n+/).map((s) => s.trim()).filter(Boolean) : []), [chapter]);
   const bodyFont = prefs.serif ? 'NotoSerifSC' : undefined;
   const lineGap = Math.round(prefs.fontSize * 0.95);
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
+      {toastNode}
       <StatusBar style={isLight ? 'dark' : 'light'} />
 
       {/* 顶栏 */}
@@ -134,9 +162,36 @@ export default function ReaderScreen() {
           <ActivityIndicator color={C.gold} />
         </View>
       ) : paragraphs.length === 0 ? (
-        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10, padding: 40 }}>
-          <Ionicons name="document-text-outline" size={36} color={theme.sub} />
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 14, padding: 40 }}>
+          <Ionicons name="sparkles-outline" size={36} color={theme.sub} />
           <Text style={{ color: theme.sub, fontSize: 13 }}>本章还没有正文</Text>
+          {submitted ? (
+            <Pressable
+              onPress={() => router.navigate('/tasks')}
+              style={{ marginTop: 6, flexDirection: 'row', alignItems: 'center', gap: 6, height: 46, paddingHorizontal: 22, borderRadius: 14, backgroundColor: C.gold }}
+            >
+              <Text style={{ color: '#1A1206', fontSize: 14.5, fontWeight: '800' }}>已提交 · 去任务页看进度</Text>
+              <Ionicons name="chevron-forward" size={15} color="#1A1206" />
+            </Pressable>
+          ) : (
+            <Pressable
+              onPress={generateHere}
+              disabled={submitting}
+              style={{ marginTop: 6, flexDirection: 'row', alignItems: 'center', gap: 7, height: 46, paddingHorizontal: 24, borderRadius: 14, backgroundColor: canGenerate === '1' ? C.gold : theme.card, opacity: submitting ? 0.7 : 1 }}
+            >
+              {submitting ? (
+                <ActivityIndicator size="small" color={canGenerate === '1' ? '#1A1206' : theme.sub} />
+              ) : (
+                <Ionicons name="sparkles" size={16} color={canGenerate === '1' ? '#1A1206' : theme.sub} />
+              )}
+              <Text style={{ color: canGenerate === '1' ? '#1A1206' : theme.sub, fontSize: 14.5, fontWeight: '800' }}>
+                {canGenerate === '1' ? '生成本章正文' : '本章暂不能生成'}
+              </Text>
+            </Pressable>
+          )}
+          {canGenerate !== '1' && reason ? (
+            <Text style={{ color: theme.sub, fontSize: 11.5, lineHeight: 17, textAlign: 'center' }}>{reason}</Text>
+          ) : null}
         </View>
       ) : (
         <ScrollView ref={scrollRef} contentContainerStyle={{ paddingHorizontal: 22, paddingTop: 26, paddingBottom: 30 }}>

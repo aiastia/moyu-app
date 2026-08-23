@@ -1,10 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
+import { Alert, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { ChapterBadge, Chip, EmptyState, ProgressBar, ScreenHeader, SegmentedTabs, Skeleton } from '@/components/ui';
+import { ChapterBadge, Chip, EmptyState, ProgressBar, ScreenHeader, SegmentedTabs, Skeleton, useToast } from '@/components/ui';
 import type { ChapterRow, CharacterItem, OutlineItem, ProjectDetail } from '@/lib/api';
 import { ApiError } from '@/lib/api';
 import { friendlyError, loadLastRead, useAuth } from '@/lib/auth';
@@ -44,6 +44,7 @@ export default function ProjectScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [lastReadId, setLastReadId] = useState<number | null>(null);
+  const [toast, toastNode] = useToast();
 
   const guard = useCallback(
     async (e: unknown) => {
@@ -105,13 +106,73 @@ export default function ProjectScreen() {
     setRefreshing(false);
   }, [load]);
 
-  const goReader = (chapterId: number) =>
-    router.push({ pathname: '/reader', params: { projectId: String(projectId), chapterId: String(chapterId) } });
+  const goReader = (c: ChapterRow) =>
+    router.push({
+      pathname: '/reader',
+      params: {
+        projectId: String(projectId),
+        chapterId: String(c.id),
+        canGenerate: c.can_generate ? '1' : '0',
+        reason: c.generate_disabled_reason ?? '',
+      },
+    });
+
+  /** 提交单章生成任务 */
+  const submitChapterGenerate = (c: ChapterRow) => {
+    if (!api) return;
+    if (!c.can_generate) {
+      Alert.alert('暂时不能生成', c.generate_disabled_reason || '服务端暂未开放此章节的生成');
+      return;
+    }
+    const confirmThen = () => {
+      api
+        .generateChapter(projectId, c.id)
+        .then(() => toast(`已提交第${c.chapter_number}章生成任务，可在「任务」页看进度`))
+        .catch((e) => Alert.alert('提交失败', friendlyError(e)));
+    };
+    if (c.word_count > 0) {
+      Alert.alert(
+        '重新生成正文',
+        `第${c.chapter_number}章已有 ${c.word_count} 字正文，重新生成会覆盖当前内容（原文在服务端保留可回滚）。确定提交吗？`,
+        [
+          { text: '取消', style: 'cancel' },
+          { text: '重新生成', style: 'destructive', onPress: confirmThen },
+        ],
+      );
+    } else {
+      Alert.alert('生成正文', `提交第${c.chapter_number}章《${c.title || '未命名'}》的 AI 生成任务？`, [
+        { text: '取消', style: 'cancel' },
+        { text: '提交生成', onPress: confirmThen },
+      ]);
+    }
+  };
+
+  /** 续写/生成大纲 */
+  const submitOutlineGenerate = (kind: 'continue' | 'new') => {
+    if (!api) return;
+    Alert.alert(
+      kind === 'new' ? '生成大纲' : '续写大纲',
+      kind === 'new' ? '为本书生成多少章大纲？' : '在现有大纲之后续写多少章？',
+      [
+        { text: '3 章', onPress: () => doOutline(kind, 3) },
+        { text: '5 章', onPress: () => doOutline(kind, 5) },
+        { text: '取消', style: 'cancel' },
+      ],
+    );
+  };
+  const doOutline = (kind: 'continue' | 'new', count: number) => {
+    if (!api) return;
+    const call = kind === 'new' ? api.generateOutlines(projectId, count) : api.continueOutlines(projectId, count);
+    call
+      .then(() => toast(`已提交大纲${kind === 'new' ? '生成' : '续写'}任务（${count} 章）`))
+      .catch((e) => Alert.alert('提交失败', friendlyError(e)));
+  };
 
   if (Number.isNaN(projectId)) return null;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: C.bg }} edges={['top']}>
+      {toastNode}
       <ScrollView
         contentContainerStyle={{ padding: SP.l, gap: 14, paddingBottom: 36 }}
         refreshControl={<RefreshControl refreshing={refreshing} tintColor={C.gold} colors={[C.gold]} onRefresh={onRefresh} />}
@@ -155,7 +216,7 @@ export default function ProjectScreen() {
             {/* 继续阅读 */}
             {lastRead ? (
               <Pressable
-                onPress={() => goReader(lastRead.id)}
+                onPress={() => goReader(lastRead)}
                 style={({ pressed }) => ({
                   flexDirection: 'row',
                   alignItems: 'center',
@@ -188,7 +249,7 @@ export default function ProjectScreen() {
                   {chapters.map((c) => (
                     <Pressable
                       key={c.id}
-                      onPress={() => goReader(c.id)}
+                      onPress={() => goReader(c)}
                       style={({ pressed }) => ({
                         flexDirection: 'row',
                         alignItems: 'center',
@@ -213,6 +274,22 @@ export default function ProjectScreen() {
                         ) : null}
                       </View>
                       <Text style={{ color: C.text3, fontSize: 11 }}>{c.word_count > 0 ? `${c.word_count}字` : '未写'}</Text>
+                      <Pressable
+                        onPress={() => submitChapterGenerate(c)}
+                        hitSlop={6}
+                        style={{
+                          width: 32,
+                          height: 32,
+                          borderRadius: 11,
+                          backgroundColor: c.can_generate ? C.goldSoft : C.card2,
+                          borderWidth: 1,
+                          borderColor: c.can_generate ? 'rgba(229,181,88,0.35)' : C.borderSoft,
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                      >
+                        <Ionicons name="sparkles" size={15} color={c.can_generate ? C.gold : C.text3} />
+                      </Pressable>
                       <Ionicons name="chevron-forward" size={14} color={C.text3} />
                     </Pressable>
                   ))}
@@ -224,9 +301,35 @@ export default function ProjectScreen() {
               outlines === null ? (
                 <Skeleton count={5} height={84} />
               ) : outlines.length === 0 ? (
-                <EmptyState icon="map-outline" title="暂无大纲" />
+                <View style={{ alignItems: 'center', gap: 16 }}>
+                  <EmptyState icon="map-outline" title="还没有大纲" sub="先给这本书生成前几章的大纲，再逐章生成正文" />
+                  <Pressable
+                    onPress={() => submitOutlineGenerate('new')}
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: 7, height: 46, paddingHorizontal: 24, borderRadius: 14, backgroundColor: C.gold }}
+                  >
+                    <Ionicons name="sparkles" size={16} color="#1A1206" />
+                    <Text style={{ color: '#1A1206', fontSize: 14.5, fontWeight: '800' }}>生成大纲</Text>
+                  </Pressable>
+                </View>
               ) : (
                 <View style={{ gap: 8 }}>
+                  <Pressable
+                    onPress={() => submitOutlineGenerate('continue')}
+                    style={({ pressed }) => ({
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 7,
+                      height: 42,
+                      borderRadius: R.m,
+                      backgroundColor: pressed ? '#3A2F16' : C.goldSoft,
+                      borderWidth: 1,
+                      borderColor: 'rgba(229,181,88,0.4)',
+                    })}
+                  >
+                    <Ionicons name="sparkles" size={15} color={C.gold} />
+                    <Text style={{ color: C.gold, fontSize: 13.5, fontWeight: '700' }}>续写大纲</Text>
+                  </Pressable>
                   {outlines.map((o) => (
                     <View key={o.id} style={{ backgroundColor: C.card, borderWidth: 1, borderColor: C.borderSoft, borderRadius: R.m, padding: 13, gap: 6 }}>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>

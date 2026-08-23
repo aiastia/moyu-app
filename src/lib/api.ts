@@ -43,6 +43,8 @@ export interface ChapterRow {
   status: string;
   quality_score?: number | null;
   summary?: string | null;
+  can_generate?: boolean;
+  generate_disabled_reason?: string | null;
 }
 
 export interface ChapterFull {
@@ -228,6 +230,30 @@ export class Api {
 
   cancelTask(taskId: number) {
     return this.req<unknown>(`/api/tasks/${taskId}/cancel`, { method: 'POST' });
+  }
+
+  /** 提交单章正文生成（异步任务，返回 task_id） */
+  generateChapter(projectId: number, chapterId: number) {
+    return this.req<{ task_id: number; chapter_id?: number }>(`/api/projects/${projectId}/chapters/${chapterId}/generate-async`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+  }
+
+  /** 续写大纲（在已有大纲之后追加 N 章） */
+  continueOutlines(projectId: number, chapterCount: number) {
+    return this.req<{ task_id: number }>(`/api/projects/${projectId}/outlines/continue-async`, {
+      method: 'POST',
+      body: JSON.stringify({ chapter_count: chapterCount }),
+    });
+  }
+
+  /** 生成大纲（全书还没有大纲时） */
+  generateOutlines(projectId: number, chapterCount: number) {
+    return this.req<{ task_id: number }>(`/api/projects/${projectId}/outlines/generate-async`, {
+      method: 'POST',
+      body: JSON.stringify({ chapter_count: chapterCount }),
+    });
   }
 
   coverUrl(projectId: number) {
