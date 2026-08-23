@@ -1,14 +1,14 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useCallback, useEffect, useState } from 'react';
-import { Alert, Pressable, ScrollView, Text, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, Alert, Pressable, Text, View } from 'react-native';
 
-import { Chip, EmptyState, FieldLabel, Input, SheetModal, Skeleton, useToast } from '@/components/ui';
+import { Chip, EmptyState, FieldLabel, Input, SelectField, SheetModal, Skeleton, useToast } from '@/components/ui';
 import type { WorldItem } from '@/lib/api';
 import { ApiError } from '@/lib/api';
 import { friendlyError, useAuth } from '@/lib/auth';
 import { C, R } from '@/lib/theme';
 
-/** 世界观设定面板：列表 + 新建/编辑/删除 */
+/** 世界观设定面板：列表 + 手动新建/编辑/删除 + AI 生成一批设定 */
 export function WorldsPanel({ projectId }: { projectId: number }) {
   const { api, logout } = useAuth();
   const [items, setItems] = useState<WorldItem[] | null>(null);
@@ -19,6 +19,9 @@ export function WorldsPanel({ projectId }: { projectId: number }) {
   const [content, setContent] = useState('');
   const [saving, setSaving] = useState(false);
   const [toast, toastNode] = useToast();
+  const [aiOpen, setAiOpen] = useState(false);
+  const [aiIdea, setAiIdea] = useState('');
+  const [aiBusy, setAiBusy] = useState(false);
 
   const load = useCallback(async () => {
     if (!api) return;
@@ -44,7 +47,7 @@ export function WorldsPanel({ projectId }: { projectId: number }) {
   const openNew = () => {
     setEditing('new');
     setName('');
-    setCategory(categories[0] ?? '');
+    setCategory(categories.includes('其他') ? '其他' : (categories[0] ?? ''));
     setContent('');
   };
 
@@ -92,26 +95,76 @@ export function WorldsPanel({ projectId }: { projectId: number }) {
     ]);
   };
 
+  /** 下拉分类选项：服务端统一清单 + 兼容历史自定义值 */
+  const categoryOptions = useMemo(() => {
+    const opts = categories.map((c) => ({ value: c, label: c }));
+    if (category && !categories.includes(category)) {
+      opts.push({ value: category, label: `${category}（历史）` });
+    }
+    return opts;
+  }, [categories, category]);
+
+  /** AI 生成一批详细设定（同步接口，需要等待） */
+  const submitAi = async () => {
+    if (!api || aiBusy) return;
+    setAiBusy(true);
+    try {
+      const r = await api.generateWorlds(projectId, { idea: aiIdea.trim() });
+      setAiOpen(false);
+      setAiIdea('');
+      toast(`AI 生成了 ${r.count} 条设定，下拉刷新查看`);
+      load();
+    } catch (e) {
+      toast(friendlyError(e));
+    } finally {
+      setAiBusy(false);
+    }
+  };
+
   return (
     <View style={{ gap: 10 }}>
       {toastNode}
-      <Pressable
-        onPress={openNew}
-        style={({ pressed }) => ({
-          flexDirection: 'row',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: 7,
-          height: 42,
-          borderRadius: R.m,
-          backgroundColor: pressed ? '#3A2F16' : C.goldSoft,
-          borderWidth: 1,
-          borderColor: 'rgba(229,181,88,0.4)',
-        })}
-      >
-        <Ionicons name="add" size={16} color={C.gold} />
-        <Text style={{ color: C.gold, fontSize: 13.5, fontWeight: '700' }}>新建世界设定</Text>
-      </Pressable>
+      <View style={{ flexDirection: 'row', gap: 10 }}>
+        <Pressable
+          onPress={openNew}
+          style={({ pressed }) => ({
+            flex: 1,
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 6,
+            height: 42,
+            borderRadius: R.m,
+            backgroundColor: pressed ? '#3A2F16' : C.goldSoft,
+            borderWidth: 1,
+            borderColor: 'rgba(229,181,88,0.4)',
+          })}
+        >
+          <Ionicons name="add" size={15} color={C.gold} />
+          <Text style={{ color: C.gold, fontSize: 13, fontWeight: '700' }}>新建设定</Text>
+        </Pressable>
+        <Pressable
+          onPress={() => {
+            setAiIdea('');
+            setAiOpen(true);
+          }}
+          style={({ pressed }) => ({
+            flex: 1,
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 6,
+            height: 42,
+            borderRadius: R.m,
+            backgroundColor: pressed ? '#20304A' : C.blueSoft,
+            borderWidth: 1,
+            borderColor: 'rgba(106,166,232,0.4)',
+          })}
+        >
+          <Ionicons name="sparkles" size={15} color={C.blue} />
+          <Text style={{ color: C.blue, fontSize: 13, fontWeight: '700' }}>AI 生成设定</Text>
+        </Pressable>
+      </View>
 
       {items === null ? (
         <Skeleton count={4} height={84} />
@@ -149,19 +202,11 @@ export function WorldsPanel({ projectId }: { projectId: number }) {
       <SheetModal visible={editing !== null} onClose={() => setEditing(null)} title={editing === 'new' ? '新建世界设定' : '编辑世界设定'}>
         <FieldLabel>名称</FieldLabel>
         <Input value={name} onChangeText={setName} placeholder="如：东洲地理格局" />
-        <FieldLabel>分类</FieldLabel>
-        <Input value={category} onChangeText={setCategory} placeholder="如：地理 / 历史 / 力量体系" />
-        {categories.length ? (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 7 }}>
-            {categories.slice(0, 12).map((cat) => (
-              <Pressable key={cat} onPress={() => setCategory(cat)}>
-                <Chip label={cat} fg={category === cat ? C.gold : C.text2} bg={category === cat ? C.goldSoft : C.card2} bold={category === cat} />
-              </Pressable>
-            ))}
-          </ScrollView>
-        ) : null}
-        <FieldLabel>内容</FieldLabel>
-        <Input value={content} onChangeText={setContent} placeholder="设定正文…" multiline height={180} />
+        <SelectField label="分类" value={category} options={categoryOptions} onChange={setCategory} placeholder="选择分类" />
+        <View style={{ gap: 7 }}>
+          <FieldLabel>内容</FieldLabel>
+          <Input value={content} onChangeText={setContent} placeholder="设定正文…" multiline height={180} />
+        </View>
         <View style={{ flexDirection: 'row', gap: 10, marginTop: 4 }}>
           {editing !== 'new' && editing ? (
             <Pressable
@@ -182,6 +227,33 @@ export function WorldsPanel({ projectId }: { projectId: number }) {
             <Text style={{ color: '#1A1206', fontSize: 14.5, fontWeight: '800' }}>{saving ? '保存中…' : '保存'}</Text>
           </Pressable>
         </View>
+      </SheetModal>
+
+      {/* AI 生成一批世界设定（同步等待） */}
+      <SheetModal visible={aiOpen} onClose={() => (aiBusy ? undefined : setAiOpen(false))} title="AI 生成设定">
+        <Text style={{ color: C.text3, fontSize: 12, lineHeight: 18 }}>
+          AI 会基于本书的世界观与已有设定，补一批地理/历史/体系类的详细条目（最多 10 条）。
+        </Text>
+        <View style={{ gap: 7 }}>
+          <FieldLabel>生成方向（可选）</FieldLabel>
+          <Input
+            value={aiIdea}
+            onChangeText={setAiIdea}
+            placeholder="如：重点补魔药体系、东海一带的地理势力"
+            multiline
+            height={90}
+            editable={!aiBusy}
+          />
+        </View>
+        <Pressable
+          onPress={submitAi}
+          disabled={aiBusy}
+          style={{ height: 46, borderRadius: R.m, backgroundColor: C.gold, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 8, opacity: aiBusy ? 0.75 : 1 }}
+        >
+          {aiBusy ? <ActivityIndicator size="small" color="#1A1206" /> : <Ionicons name="sparkles" size={16} color="#1A1206" />}
+          <Text style={{ color: '#1A1206', fontSize: 15, fontWeight: '800' }}>{aiBusy ? 'AI 正在生成，稍等…' : '开始生成'}</Text>
+        </Pressable>
+        <Text style={{ color: C.text3, fontSize: 11, lineHeight: 16, textAlign: 'center' }}>这一步要等 AI 写完（约半分钟到几分钟），生成中请不要关闭弹窗</Text>
       </SheetModal>
     </View>
   );

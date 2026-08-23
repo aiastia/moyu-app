@@ -369,7 +369,10 @@ export default function TasksScreen() {
           <EmptyState icon="cloud-offline-outline" title="任务加载失败" sub={error} />
         ) : (
           <ScrollView
-            contentContainerStyle={{ flexGrow: 1, justifyContent: tasks?.length ? 'flex-start' : 'center', gap: 12, paddingBottom: 28 }}
+            // 有任务时 flexGrow 必须为 0：本机 Fabric 实测内容容器 flexGrow:1 时短内容会被垂直居中
+            // （justifyContent:flex-start 不生效，v1.4.2 已踩坑）；容器按内容自适应高度才稳定贴顶，
+            // 与书架页 FlatList 同款写法。空态才 flexGrow:1 + center 居中"暂无任务"。
+            contentContainerStyle={{ flexGrow: tasks?.length ? 0 : 1, justifyContent: tasks?.length ? undefined : 'center', gap: 12, paddingBottom: 28 }}
             refreshControl={<RefreshControl refreshing={refreshing} tintColor={C.gold} colors={[C.gold]} onRefresh={onRefresh} />}
           >
             {tasks?.length ? (

@@ -3,13 +3,23 @@ import { router } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, Text, View } from 'react-native';
 
-import { Chip, EmptyState, FieldLabel, Input, SheetModal, Skeleton, useToast } from '@/components/ui';
+import { Chip, EmptyState, FieldLabel, Input, SelectField, SheetModal, Skeleton, useToast } from '@/components/ui';
 import type { ForeshadowItem } from '@/lib/api';
 import { ApiError, FORESHADOW_STATUS_LABEL } from '@/lib/api';
 import { friendlyError, useAuth } from '@/lib/auth';
 import { C, R } from '@/lib/theme';
 
-const TYPE_OPTIONS = ['悬念', '情感', '认知', '线索'];
+const TYPE_SELECT_OPTIONS = [
+  { value: '悬念', label: '悬念', hint: '吊读者胃口，晚点揭晓' },
+  { value: '情感', label: '情感', hint: '感情线的暗流铺垫' },
+  { value: '认知', label: '认知', hint: '人物认知/真相的反转空间' },
+  { value: '线索', label: '线索', hint: '可追查的具体线索物' },
+];
+
+const PLAN_SOURCE_OPTIONS = [
+  { value: 'outline', label: '基于大纲', hint: '逐章分析大纲里的埋点与回收时机' },
+  { value: 'blueprint', label: '基于蓝图', hint: '按全书蓝图的伏笔计划来规划' },
+];
 
 const FILTERS = [
   { key: '', label: '全部' },
@@ -49,6 +59,11 @@ export function ForeshadowsPanel({ projectId }: { projectId: number }) {
   const [resolveCh, setResolveCh] = useState('');
   const [saving, setSaving] = useState(false);
   const [toast, toastNode] = useToast();
+  const [planOpen, setPlanOpen] = useState(false);
+  const [planSource, setPlanSource] = useState<'outline' | 'blueprint'>('outline');
+  const [planFrom, setPlanFrom] = useState('');
+  const [planTo, setPlanTo] = useState('');
+  const [planSubmitting, setPlanSubmitting] = useState(false);
 
   const load = useCallback(
     async (status = filter) => {
@@ -173,20 +188,26 @@ export function ForeshadowsPanel({ projectId }: { projectId: number }) {
   };
 
   const planByAI = () => {
-    Alert.alert('AI 规划伏笔', '基于什么来规划伏笔？', [
-      { text: '基于大纲', onPress: () => submitPlan('outline') },
-      { text: '基于蓝图', onPress: () => submitPlan('blueprint') },
-      { text: '取消', style: 'cancel' },
-    ]);
+    setPlanSource('outline');
+    setPlanFrom('');
+    setPlanTo('');
+    setPlanOpen(true);
   };
-  const submitPlan = (source: 'outline' | 'blueprint') => {
+  const submitPlan = () => {
+    if (!api || planSubmitting) return;
+    const from = Number(planFrom) || 0;
+    const to = Number(planTo) || 0;
+    const range = from > 0 && to > 0 ? ([Math.min(from, to), Math.max(from, to)] as [number, number]) : null;
+    setPlanSubmitting(true);
     api
-      ?.planForeshadowsAsync(projectId, source)
+      ?.planForeshadowsAsync(projectId, planSource, range)
       .then(() => {
+        setPlanOpen(false);
         toast('已提交伏笔规划任务，可在「任务」页看进度');
         router.navigate('/tasks');
       })
-      .catch((e) => toast(friendlyError(e)));
+      .catch((e) => toast(friendlyError(e)))
+      .finally(() => setPlanSubmitting(false));
   };
 
   const cur = editing && editing !== 'new' ? editing : null;
@@ -307,16 +328,11 @@ export function ForeshadowsPanel({ projectId }: { projectId: number }) {
       <SheetModal visible={editing !== null} onClose={() => setEditing(null)} title={editing === 'new' ? '新建伏笔' : '伏笔详情'}>
         <FieldLabel>标题</FieldLabel>
         <Input value={title} onChangeText={setTitle} placeholder="伏笔标题" />
-        <FieldLabel>类型</FieldLabel>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 7 }}>
-          {TYPE_OPTIONS.map((t) => (
-            <Pressable key={t} onPress={() => setType(t)}>
-              <Chip label={t} fg={type === t ? C.gold : C.text2} bg={type === t ? C.goldSoft : C.card2} bold={type === t} />
-            </Pressable>
-          ))}
-        </ScrollView>
-        <FieldLabel>内容（埋什么、怎么收）</FieldLabel>
-        <Input value={content} onChangeText={setContent} placeholder="伏笔内容…" multiline height={140} />
+        <SelectField label="类型" value={type || '悬念'} options={TYPE_SELECT_OPTIONS} onChange={setType} />
+        <View style={{ gap: 7 }}>
+          <FieldLabel>内容（埋什么、怎么收）</FieldLabel>
+          <Input value={content} onChangeText={setContent} placeholder="伏笔内容…" multiline height={140} />
+        </View>
         <View style={{ flexDirection: 'row', gap: 10 }}>
           <View style={{ flex: 1, gap: 7 }}>
             <FieldLabel>计划埋入章</FieldLabel>
@@ -382,6 +398,36 @@ export function ForeshadowsPanel({ projectId }: { projectId: number }) {
             </Text>
           </View>
         ) : null}
+      </SheetModal>
+
+      {/* AI 规划伏笔：自绘弹窗（原生 Alert 样式与 App 风格不符） */}
+      <SheetModal visible={planOpen} onClose={() => setPlanOpen(false)} title="AI 规划伏笔">
+        <Text style={{ color: C.text3, fontSize: 12, lineHeight: 18 }}>
+          AI 分析大纲或蓝图，自动产出一批带埋入/回收章号的伏笔计划，完成后可直接在列表里编辑。
+        </Text>
+        <SelectField
+          label="规划依据"
+          value={planSource}
+          options={PLAN_SOURCE_OPTIONS}
+          onChange={(v) => setPlanSource(v as 'outline' | 'blueprint')}
+        />
+        <View style={{ gap: 7 }}>
+          <FieldLabel>限定章号范围（可选）</FieldLabel>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+            <Input style={{ flex: 1 }} value={planFrom} onChangeText={(v) => setPlanFrom(v.replace(/[^0-9]/g, ''))} placeholder="起始章" keyboardType="number-pad" />
+            <Ionicons name="remove" size={14} color={C.text3} />
+            <Input style={{ flex: 1 }} value={planTo} onChangeText={(v) => setPlanTo(v.replace(/[^0-9]/g, ''))} placeholder="结束章" keyboardType="number-pad" />
+          </View>
+          <Text style={{ color: C.text3, fontSize: 11, lineHeight: 16 }}>留空则分析全部大纲；基于蓝图时范围仅作参考</Text>
+        </View>
+        <Pressable
+          onPress={submitPlan}
+          disabled={planSubmitting}
+          style={{ height: 46, borderRadius: R.m, backgroundColor: C.blue, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 8, opacity: planSubmitting ? 0.75 : 1 }}
+        >
+          <Ionicons name="sparkles" size={16} color="#0B1524" />
+          <Text style={{ color: '#0B1524', fontSize: 15, fontWeight: '800' }}>{planSubmitting ? '提交中…' : '开始规划'}</Text>
+        </Pressable>
       </SheetModal>
     </View>
   );

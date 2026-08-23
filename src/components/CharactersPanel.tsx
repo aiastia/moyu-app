@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, Pressable, ScrollView, Text, View } from 'react-native';
+import { Alert, Pressable, Text, View } from 'react-native';
 
 import { Chip, EmptyState, FieldLabel, Input, SelectField, SheetModal, Skeleton, useToast } from '@/components/ui';
 import { PortraitSheet } from '@/components/PortraitSheet';
@@ -11,7 +11,6 @@ import { friendlyError, useAuth } from '@/lib/auth';
 import { C, R } from '@/lib/theme';
 
 const ROLES = ['主角', '男主', '女主', '大反派', '反派', '配角', '路人'];
-const GENDERS = ['男', '女', ''];
 
 const ROLE_OPTIONS = [
   { value: '', label: '不指定', hint: 'AI 根据大纲自由分配定位' },
