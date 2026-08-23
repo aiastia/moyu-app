@@ -347,6 +347,14 @@ export class Api {
     return this.req<unknown>(`/api/projects/${projectId}/characters/${characterId}`, { method: 'DELETE' });
   }
 
+  /** AI 批量生成角色（异步任务，返回 task_id）。role 空=AI 自由分配 */
+  generateCharactersAsync(projectId: number, body: { count: number; role?: string; requirements?: string }) {
+    return this.req<{ task_id: number }>(`/api/projects/${projectId}/characters/batch-generate-async`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
   /** 提交单章正文生成（异步任务，返回 task_id） */
   generateChapter(projectId: number, chapterId: number) {
     return this.req<{ task_id: number; chapter_id?: number }>(`/api/projects/${projectId}/chapters/${chapterId}/generate-async`, {
@@ -406,6 +414,14 @@ export class Api {
     return this.req<{ categories: string[] }>(`/api/projects/${projectId}/worlds/categories`);
   }
 
+  /** AI 生成详细世界设定条目（同步接口，AI 跑完才返回，调用方需 loading 态） */
+  generateWorlds(projectId: number, body: { idea?: string }) {
+    return this.req<{ count: number; items: { name: string; category: string }[] }>(`/api/projects/${projectId}/worlds/generate`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
   // ===== 伏笔 =====
   getForeshadows(projectId: number, status?: string) {
     const q = status ? `?status=${encodeURIComponent(status)}` : '';
@@ -451,11 +467,11 @@ export class Api {
     });
   }
 
-  /** AI 自动规划伏笔（异步任务）。source: outline=基于大纲 / blueprint=基于蓝图 */
-  planForeshadowsAsync(projectId: number, source: 'outline' | 'blueprint') {
+  /** AI 自动规划伏笔（异步任务）。source: outline=基于大纲 / blueprint=基于蓝图；chapterRange 限定章号范围 */
+  planForeshadowsAsync(projectId: number, source: 'outline' | 'blueprint', chapterRange?: [number, number] | null) {
     return this.req<{ task_id: number }>(`/api/projects/${projectId}/foreshadows/plan/async`, {
       method: 'POST',
-      body: JSON.stringify({ source }),
+      body: JSON.stringify({ source, chapter_range: chapterRange ?? null }),
     });
   }
 

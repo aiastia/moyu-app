@@ -199,6 +199,126 @@ export function Input({
   );
 }
 
+/** 下拉选项。labelFontFamily 让选项按自身字体渲染（阅读器字体预览用） */
+export interface SelectOption {
+  value: string;
+  label: string;
+  /** 选项行右侧的补充说明 */
+  hint?: string;
+  labelFontFamily?: string;
+}
+
+/** 表单下拉框：触发器样式与 Input 一致，点开是底部选项弹层（不系统原生弹窗）。
+ *  选项弹层的遮罩用绝对定位兄弟节点，面板是普通 View——与 SheetModal 同构，
+ *  避免安卓下嵌套 Pressable 的手势协商问题。 */
+export function SelectField({
+  label,
+  value,
+  options,
+  onChange,
+  placeholder = '请选择',
+  disabled = false,
+}: {
+  label?: string;
+  value: string;
+  options: SelectOption[];
+  onChange: (v: string) => void;
+  placeholder?: string;
+  disabled?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const { height: winH } = useWindowDimensions();
+  const current = options.find((o) => o.value === value);
+
+  return (
+    <View style={{ gap: 7 }}>
+      {label ? <FieldLabel>{label}</FieldLabel> : null}
+      <Pressable
+        onPress={() => !disabled && setOpen(true)}
+        style={({ pressed }) => ({
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 8,
+          height: 44,
+          paddingHorizontal: 13,
+          backgroundColor: pressed ? '#131826' : '#0F121B',
+          borderWidth: 1,
+          borderColor: '#242A3B',
+          borderRadius: R.m,
+          opacity: disabled ? 0.55 : 1,
+        })}
+      >
+        <Text
+          style={{ color: current ? C.text : '#5A6170', fontSize: 14.5, flex: 1, fontFamily: current?.labelFontFamily }}
+          numberOfLines={1}
+        >
+          {current?.label ?? placeholder}
+        </Text>
+        <Ionicons name="chevron-down" size={15} color={C.text3} />
+      </Pressable>
+
+      <Modal visible={open} animationType="slide" transparent onRequestClose={() => setOpen(false)} statusBarTranslucent navigationBarTranslucent>
+        <View style={{ flex: 1, justifyContent: 'flex-end' }}>
+          <Pressable
+            onPress={() => setOpen(false)}
+            style={{ position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, backgroundColor: 'rgba(0,0,0,0.55)' }}
+          />
+          <View
+            style={{
+              backgroundColor: '#141826',
+              borderTopLeftRadius: 24,
+              borderTopRightRadius: 24,
+              paddingHorizontal: 20,
+              paddingTop: 10,
+              paddingBottom: 30,
+              borderWidth: 1,
+              borderColor: '#262C3F',
+              maxHeight: '72%',
+            }}
+          >
+            <View style={{ width: 40, height: 4, borderRadius: 2, backgroundColor: '#313A52', alignSelf: 'center', marginBottom: 12 }} />
+            <ScrollView style={{ maxHeight: Math.round(winH * 0.5) }} contentContainerStyle={{ gap: 4 }}>
+              {options.map((o) => {
+                const on = o.value === value;
+                return (
+                  <Pressable
+                    key={o.value}
+                    onPress={() => {
+                      onChange(o.value);
+                      setOpen(false);
+                    }}
+                    style={({ pressed }) => ({
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 10,
+                      paddingVertical: 13,
+                      paddingHorizontal: 14,
+                      borderRadius: R.m,
+                      backgroundColor: on ? C.goldSoft : pressed ? C.card2 : 'transparent',
+                      borderWidth: 1,
+                      borderColor: on ? 'rgba(229,181,88,0.4)' : 'transparent',
+                    })}
+                  >
+                    <View style={{ flex: 1, gap: 2 }}>
+                      <Text style={{ color: on ? C.gold : C.text, fontSize: 14.5, fontWeight: on ? '700' : '500', fontFamily: o.labelFontFamily }} numberOfLines={1}>
+                        {o.label}
+                      </Text>
+                      {o.hint ? (
+                        <Text style={{ color: C.text3, fontSize: 11.5, lineHeight: 16 }}>{o.hint}</Text>
+                      ) : null}
+                    </View>
+                    {on ? <Ionicons name="checkmark" size={17} color={C.gold} /> : null}
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+    </View>
+  );
+}
+
 /** 底部弹层表单壳：整层半透明遮罩 + 圆角面板浮在上面（圆角缺口透出遮罩色，不会露白边）。
  *  安卓 Fabric 下长内容弹层的三个坑（v1.5.1 重做）：
  *  1) 遮罩改为绝对定位的兄弟节点，面板不再嵌在带 onPress 的 Pressable 里，父级不参与手势协商；

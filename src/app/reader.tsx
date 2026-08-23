@@ -11,7 +11,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import type { ChapterFull, ChapterNav } from '@/lib/api';
 import { ApiError } from '@/lib/api';
 import { friendlyError, loadReaderPrefs, saveLastRead, saveReaderPrefs, useAuth } from '@/lib/auth';
-import { SheetModal, useToast } from '@/components/ui';
+import { SheetModal, SelectField, useToast } from '@/components/ui';
 import { getChapterVersion } from '@/lib/version';
 import { C, DEFAULT_READER_PREFS, READER_FONTS, READER_THEMES, type ReaderPrefs } from '@/lib/theme';
 
@@ -185,6 +185,14 @@ export default function ReaderScreen() {
     () => (prefs.fontKey === 'custom' && customFontReady ? CUSTOM_FONT_FAMILY : READER_FONTS.find((f) => f.key === prefs.fontKey)?.fontFamily),
     [prefs.fontKey, customFontReady],
   );
+  /** 字体下拉选项：系统字体 + 已导入的自定义字体（选项文字按各自字体渲染预览） */
+  const fontOptions = useMemo(() => {
+    const opts = READER_FONTS.map((f) => ({ value: f.key, label: f.label, labelFontFamily: f.fontFamily }));
+    if (customFontReady && prefs.customFontLabel) {
+      opts.push({ value: 'custom', label: prefs.customFontLabel, labelFontFamily: CUSTOM_FONT_FAMILY });
+    }
+    return opts;
+  }, [customFontReady, prefs.customFontLabel]);
   const lineGap = Math.round(prefs.fontSize * 0.95);
 
   return (
@@ -376,71 +384,37 @@ export default function ReaderScreen() {
         </View>
 
         <View style={{ gap: 9 }}>
-          <Text style={{ color: C.text2, fontSize: 13 }}>字体（系统自带，设备支持哪个呈现哪个）</Text>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-            {READER_FONTS.map((f) => {
-              const on = prefs.fontKey === f.key;
-              return (
-                <Pressable
-                  key={f.key}
-                  onPress={() => updatePrefs({ fontKey: f.key })}
-                  style={{
-                    paddingHorizontal: 14,
-                    height: 36,
-                    borderRadius: 12,
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    backgroundColor: on ? C.goldSoft : C.card2,
-                    borderWidth: 1,
-                    borderColor: on ? 'rgba(229,181,88,0.45)' : C.border,
-                  }}
-                >
-                  <Text style={{ color: on ? C.gold : C.text2, fontSize: 14, fontWeight: '600', fontFamily: f.fontFamily }}>{f.label}</Text>
-                </Pressable>
-              );
-            })}
-            {customFontReady && prefs.customFontLabel ? (
-              <Pressable
-                onPress={() => updatePrefs({ fontKey: 'custom' })}
-                style={{
-                  paddingHorizontal: 14,
-                  height: 36,
-                  borderRadius: 12,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  backgroundColor: prefs.fontKey === 'custom' ? C.goldSoft : C.card2,
-                  borderWidth: 1,
-                  borderColor: prefs.fontKey === 'custom' ? 'rgba(229,181,88,0.45)' : C.border,
-                }}
-              >
-                <Text style={{ color: prefs.fontKey === 'custom' ? C.gold : C.text2, fontSize: 14, fontWeight: '600', fontFamily: CUSTOM_FONT_FAMILY }}>
-                  {prefs.customFontLabel}
-                </Text>
-              </Pressable>
-            ) : null}
-            <Pressable
-              onPress={importFont}
-              disabled={importingFont}
-              style={{
-                paddingHorizontal: 14,
-                height: 36,
-                borderRadius: 12,
-                flexDirection: 'row',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 5,
-                backgroundColor: 'transparent',
-                borderWidth: 1,
-                borderStyle: 'dashed',
-                borderColor: 'rgba(229,181,88,0.5)',
-                opacity: importingFont ? 0.6 : 1,
-              }}
-            >
-              {importingFont ? <ActivityIndicator size="small" color={C.gold} /> : <Ionicons name="add" size={14} color={C.gold} />}
-              <Text style={{ color: C.gold, fontSize: 13.5, fontWeight: '600' }}>导入设备字体</Text>
-            </Pressable>
-          </View>
-          <Text style={{ color: C.text3, fontSize: 11.5, lineHeight: 17 }}>导入设备上的 .ttf / .otf 字体文件（如下载的字体包），只对阅读正文生效</Text>
+          <Text style={{ color: C.text2, fontSize: 13 }}>字体</Text>
+          <SelectField
+            value={prefs.fontKey}
+            options={fontOptions}
+            onChange={(k) => updatePrefs({ fontKey: k })}
+          />
+          <Pressable
+            onPress={importFont}
+            disabled={importingFont}
+            style={{
+              height: 42,
+              borderRadius: 12,
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 5,
+              backgroundColor: 'transparent',
+              borderWidth: 1,
+              borderStyle: 'dashed',
+              borderColor: 'rgba(229,181,88,0.5)',
+              opacity: importingFont ? 0.6 : 1,
+            }}
+          >
+            {importingFont ? <ActivityIndicator size="small" color={C.gold} /> : <Ionicons name="add" size={14} color={C.gold} />}
+            <Text style={{ color: C.gold, fontSize: 13.5, fontWeight: '600' }}>
+              {prefs.fontKey === 'custom' && prefs.customFontLabel ? '换一个字体文件' : '导入设备字体'}
+            </Text>
+          </Pressable>
+          <Text style={{ color: C.text3, fontSize: 11.5, lineHeight: 17 }}>
+            系统字体按设备支持呈现；导入 .ttf / .otf / .ttc 字体文件后出现在下拉里，只对阅读正文生效
+          </Text>
         </View>
       </SheetModal>
     </View>

@@ -1,8 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
+import { router } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, Text, View } from 'react-native';
 
-import { Chip, EmptyState, FieldLabel, Input, SheetModal, Skeleton, useToast } from '@/components/ui';
+import { Chip, EmptyState, FieldLabel, Input, SelectField, SheetModal, Skeleton, useToast } from '@/components/ui';
 import { PortraitSheet } from '@/components/PortraitSheet';
 import type { CharacterBody, CharacterItem } from '@/lib/api';
 import { ApiError } from '@/lib/api';
@@ -12,6 +13,16 @@ import { C, R } from '@/lib/theme';
 const ROLES = ['主角', '男主', '女主', '大反派', '反派', '配角', '路人'];
 const GENDERS = ['男', '女', ''];
 
+const ROLE_OPTIONS = [
+  { value: '', label: '不指定', hint: 'AI 根据大纲自由分配定位' },
+  ...ROLES.map((r) => ({ value: r, label: r })),
+];
+const GENDER_OPTIONS = [
+  { value: '', label: '不填' },
+  { value: '男', label: '男' },
+  { value: '女', label: '女' },
+];
+
 const ROLE_COLOR: Record<string, { fg: string; bg: string }> = {
   主角: { fg: '#E5B558', bg: 'rgba(229,181,88,0.13)' },
   男主: { fg: '#E5B558', bg: 'rgba(229,181,88,0.13)' },
@@ -20,7 +31,7 @@ const ROLE_COLOR: Record<string, { fg: string; bg: string }> = {
   反派: { fg: '#D65A45', bg: 'rgba(214,90,69,0.14)' },
 };
 
-/** 角色面板：列表 + 新建/编辑/删除 */
+/** 角色面板：列表 + 手动新建/编辑/删除 + AI 批量生成 */
 export function CharactersPanel({ projectId }: { projectId: number }) {
   const { api, logout } = useAuth();
   const [items, setItems] = useState<CharacterItem[] | null>(null);
@@ -29,6 +40,11 @@ export function CharactersPanel({ projectId }: { projectId: number }) {
   const [saving, setSaving] = useState(false);
   const [toast, toastNode] = useToast();
   const [portraitChar, setPortraitChar] = useState<CharacterItem | null>(null);
+  const [aiOpen, setAiOpen] = useState(false);
+  const [aiCount, setAiCount] = useState(3);
+  const [aiRole, setAiRole] = useState('');
+  const [aiReq, setAiReq] = useState('');
+  const [aiSubmitting, setAiSubmitting] = useState(false);
 
   const set = (patch: Partial<CharacterBody>) => setForm((f) => ({ ...f, ...patch }));
 
@@ -112,28 +128,69 @@ export function CharactersPanel({ projectId }: { projectId: number }) {
     ]);
   };
 
+  /** 提交 AI 批量生成角色（异步任务，任务页看进度） */
+  const submitAi = () => {
+    if (!api || aiSubmitting) return;
+    setAiSubmitting(true);
+    api
+      .generateCharactersAsync(projectId, { count: aiCount, role: aiRole, requirements: aiReq.trim() })
+      .then(() => {
+        setAiOpen(false);
+        toast('已提交角色生成任务，可在「任务」页看进度');
+        router.navigate('/tasks');
+      })
+      .catch((e) => toast(friendlyError(e)))
+      .finally(() => setAiSubmitting(false));
+  };
+
   const cur = editing && editing !== 'new' ? editing : null;
 
   return (
     <View style={{ gap: 10 }}>
       {toastNode}
-      <Pressable
-        onPress={openNew}
-        style={({ pressed }) => ({
-          flexDirection: 'row',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: 7,
-          height: 42,
-          borderRadius: R.m,
-          backgroundColor: pressed ? '#3A2F16' : C.goldSoft,
-          borderWidth: 1,
-          borderColor: 'rgba(229,181,88,0.4)',
-        })}
-      >
-        <Ionicons name="add" size={16} color={C.gold} />
-        <Text style={{ color: C.gold, fontSize: 13.5, fontWeight: '700' }}>新建角色</Text>
-      </Pressable>
+      <View style={{ flexDirection: 'row', gap: 10 }}>
+        <Pressable
+          onPress={openNew}
+          style={({ pressed }) => ({
+            flex: 1,
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 6,
+            height: 42,
+            borderRadius: R.m,
+            backgroundColor: pressed ? '#3A2F16' : C.goldSoft,
+            borderWidth: 1,
+            borderColor: 'rgba(229,181,88,0.4)',
+          })}
+        >
+          <Ionicons name="add" size={15} color={C.gold} />
+          <Text style={{ color: C.gold, fontSize: 13, fontWeight: '700' }}>新建角色</Text>
+        </Pressable>
+        <Pressable
+          onPress={() => {
+            setAiCount(3);
+            setAiRole('');
+            setAiReq('');
+            setAiOpen(true);
+          }}
+          style={({ pressed }) => ({
+            flex: 1,
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 6,
+            height: 42,
+            borderRadius: R.m,
+            backgroundColor: pressed ? '#20304A' : C.blueSoft,
+            borderWidth: 1,
+            borderColor: 'rgba(106,166,232,0.4)',
+          })}
+        >
+          <Ionicons name="sparkles" size={15} color={C.blue} />
+          <Text style={{ color: C.blue, fontSize: 13, fontWeight: '700' }}>AI 生成角色</Text>
+        </Pressable>
+      </View>
 
       {items === null ? (
         <Skeleton count={4} height={88} />
@@ -198,19 +255,11 @@ export function CharactersPanel({ projectId }: { projectId: number }) {
         <FieldLabel>姓名 *</FieldLabel>
         <Input value={form.name ?? ''} onChangeText={(v) => set({ name: v })} placeholder="角色姓名" />
 
-        <FieldLabel>定位</FieldLabel>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 7 }}>
-          {ROLES.map((r) => (
-            <Pressable key={r} onPress={() => set({ role: r })}>
-              <Chip label={r} fg={form.role === r ? C.gold : C.text2} bg={form.role === r ? C.goldSoft : C.card2} bold={form.role === r} />
-            </Pressable>
-          ))}
-        </ScrollView>
+        <SelectField label="定位" value={form.role ?? ''} options={ROLES.map((r) => ({ value: r, label: r }))} onChange={(v) => set({ role: v })} />
 
         <View style={{ flexDirection: 'row', gap: 10 }}>
-          <View style={{ width: 110, gap: 7 }}>
-            <FieldLabel>性别</FieldLabel>
-            <Input value={form.gender ?? ''} onChangeText={(v) => set({ gender: v })} placeholder="男/女" />
+          <View style={{ width: 120 }}>
+            <SelectField label="性别" value={form.gender ?? ''} options={GENDER_OPTIONS} onChange={(v) => set({ gender: v })} />
           </View>
           <View style={{ flex: 1, gap: 7 }}>
             <FieldLabel>年龄</FieldLabel>
@@ -264,6 +313,59 @@ export function CharactersPanel({ projectId }: { projectId: number }) {
         onClose={() => setPortraitChar(null)}
         onUpdated={load}
       />
+
+      {/* AI 批量生成角色 */}
+      <SheetModal visible={aiOpen} onClose={() => setAiOpen(false)} title="AI 生成角色">
+        <Text style={{ color: C.text3, fontSize: 12, lineHeight: 18 }}>
+          AI 会参考本书的世界观、大纲和已有角色，生成一批不重样的新角色档案。
+        </Text>
+        <View style={{ gap: 9 }}>
+          <FieldLabel>生成数量</FieldLabel>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            {[1, 2, 3, 5].map((n) => {
+              const on = aiCount === n;
+              return (
+                <Pressable
+                  key={n}
+                  onPress={() => setAiCount(n)}
+                  style={{
+                    paddingHorizontal: 18,
+                    height: 38,
+                    borderRadius: 13,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    backgroundColor: on ? C.goldSoft : C.card2,
+                    borderWidth: 1,
+                    borderColor: on ? 'rgba(229,181,88,0.45)' : C.border,
+                  }}
+                >
+                  <Text style={{ color: on ? C.gold : C.text2, fontSize: 13.5, fontWeight: on ? '700' : '500' }}>{n} 个</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+        <SelectField label="角色定位" value={aiRole} options={ROLE_OPTIONS} onChange={setAiRole} />
+        <View style={{ gap: 7 }}>
+          <FieldLabel>补充要求（可选）</FieldLabel>
+          <Input
+            value={aiReq}
+            onChangeText={setAiReq}
+            placeholder="如：需要 2 个女性角色；反派是主角的师兄"
+            multiline
+            height={80}
+          />
+        </View>
+        <Pressable
+          onPress={submitAi}
+          disabled={aiSubmitting}
+          style={{ height: 46, borderRadius: R.m, backgroundColor: C.gold, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 8, opacity: aiSubmitting ? 0.7 : 1 }}
+        >
+          <Ionicons name="sparkles" size={16} color="#1A1206" />
+          <Text style={{ color: '#1A1206', fontSize: 15, fontWeight: '800' }}>{aiSubmitting ? '提交中…' : `生成 ${aiCount} 个角色`}</Text>
+        </Pressable>
+        <Text style={{ color: C.text3, fontSize: 11, lineHeight: 16, textAlign: 'center' }}>异步执行不占手机，完成后回本页下拉刷新</Text>
+      </SheetModal>
     </View>
   );
 }
