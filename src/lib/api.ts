@@ -78,7 +78,8 @@ export interface OutlineItem {
   summary?: string | null;
   emotion?: string | null;
   goal?: string | null;
-  key_points?: string | null;
+  /** 服务端是 JSON 数组（list[str]）；历史数据/网页端手填的可能是换行分隔字符串，两种都兼容 */
+  key_points?: string[] | string | null;
 }
 
 export interface CharacterItem {

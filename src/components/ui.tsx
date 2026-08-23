@@ -200,39 +200,68 @@ export function Input({
 }
 
 /** 底部弹层表单壳：整层半透明遮罩 + 圆角面板浮在上面（圆角缺口透出遮罩色，不会露白边）。
- *  滚动约束必须直接加在 ScrollView 自己身上（具体像素 maxHeight）：只给外层面板 maxHeight
- *  时 ScrollView 会按内容自报全高，面板裁掉溢出但 ScrollView 不认为自己可滚——长表单
- *  （如角色编辑）下半截被裁且拖不动，就是这个问题。 */
+ *  安卓 Fabric 下长内容弹层的三个坑（v1.5.1 重做）：
+ *  1) 遮罩改为绝对定位的兄弟节点，面板不再嵌在带 onPress 的 Pressable 里，父级不参与手势协商；
+ *  2) 滚动区高度双保险：除 Yoga 的 maxHeight 外，再用 onContentSizeChange 量到的内容高取
+ *     min(内容高, 上限) 作**像素级显式 height**——显式高度下安卓 ScrollView 必然可滚，
+ *     不依赖 wrap-content 父容器传约束（ScrollView 自报全高时会出现"下半截被裁且拖不动"）；
+ *  3) 打开时 scrollTo(0) 回顶：Modal 首帧可能按内容全高布局、收窄后滚动位置残留在底部，
+ *     表现为"弹窗默认滚到最底下"，必须每次打开显式回顶。 */
 export function SheetModal({ visible, onClose, title, children }: { visible: boolean; onClose: () => void; title: string; children: React.ReactNode }) {
   const { height: winH } = useWindowDimensions();
+  const scrollRef = useRef<ScrollView>(null);
+  const [contentH, setContentH] = useState(0);
+  const maxScrollH = Math.round(winH * 0.62);
+
+  useEffect(() => {
+    if (visible) {
+      setContentH(0);
+      // 下一帧 + 布局稳定后各回顶一次，清掉首帧全高布局残留的底部偏移
+      requestAnimationFrame(() => scrollRef.current?.scrollTo({ y: 0, animated: false }));
+      const t = setTimeout(() => scrollRef.current?.scrollTo({ y: 0, animated: false }), 80);
+      return () => clearTimeout(t);
+    }
+  }, [visible]);
+
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose} statusBarTranslucent navigationBarTranslucent>
-      <Pressable style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={onClose}>
-        {/* 内层 Pressable 拦截点击，防止点表单误关闭 */}
+      <View style={{ flex: 1, justifyContent: 'flex-end' }}>
         <Pressable
+          onPress={onClose}
+          style={{ position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, backgroundColor: 'rgba(0,0,0,0.55)' }}
+        />
+        <View
           style={{
             backgroundColor: '#141826',
             borderTopLeftRadius: 24,
             borderTopRightRadius: 24,
             paddingHorizontal: 20,
-            paddingTop: 18,
+            paddingTop: 10,
             paddingBottom: 36,
-            maxHeight: '88%',
+            maxHeight: Math.round(winH * 0.88),
             borderWidth: 1,
             borderColor: '#262C3F',
           }}
         >
+          <View style={{ width: 40, height: 4, borderRadius: 2, backgroundColor: '#313A52', alignSelf: 'center', marginBottom: 12 }} />
           <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 14 }}>
             <Text style={{ color: C.text, fontSize: 16, fontWeight: '800', flex: 1 }}>{title}</Text>
             <Pressable onPress={onClose} hitSlop={8}>
               <Ionicons name="close" size={21} color={C.text2} />
             </Pressable>
           </View>
-          <ScrollView style={{ maxHeight: Math.round(winH * 0.62) }} keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 12, paddingBottom: 6 }}>
+          <ScrollView
+            ref={scrollRef}
+            style={contentH > 0 ? { height: Math.min(contentH, maxScrollH), maxHeight: maxScrollH } : { maxHeight: maxScrollH }}
+            contentContainerStyle={{ gap: 12, paddingBottom: 6 }}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
+            onContentSizeChange={(_, h) => setContentH(h)}
+          >
             {children}
           </ScrollView>
-        </Pressable>
-      </Pressable>
+        </View>
+      </View>
     </Modal>
   );
 }

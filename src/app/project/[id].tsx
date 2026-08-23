@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { ChapterBadge, Chip, EmptyState, ProgressBar, ScreenHeader, SegmentedTabs, SheetModal, Skeleton, useToast } from '@/components/ui';
+import { ChapterBadge, Chip, EmptyState, FieldLabel, ProgressBar, ScreenHeader, SegmentedTabs, SheetModal, Skeleton, useToast } from '@/components/ui';
 import { ForeshadowsPanel } from '@/components/ForeshadowsPanel';
 import { CharactersPanel } from '@/components/CharactersPanel';
 import { WorldsPanel } from '@/components/WorldsPanel';
@@ -47,6 +47,8 @@ export default function ProjectScreen() {
   const [chapters, setChapters] = useState<ChapterRow[] | null>(null);
   const [outlines, setOutlines] = useState<OutlineItem[] | null>(null);
   const [outlineDetail, setOutlineDetail] = useState<OutlineItem | null>(null);
+  const [outlineGen, setOutlineGen] = useState<'new' | 'continue' | null>(null);
+  const [outlineCount, setOutlineCount] = useState(5);
   const [lastRead, setLastRead] = useState<ChapterRow | null>(null);
   const [tab, setTab] = useState<TabKey>('chapters');
   const [refreshing, setRefreshing] = useState(false);
@@ -153,26 +155,26 @@ export default function ProjectScreen() {
     }
   };
 
-  /** 续写/生成大纲 */
-  const submitOutlineGenerate = (kind: 'continue' | 'new') => {
-    if (!api) return;
-    Alert.alert(
-      kind === 'new' ? '生成大纲' : '续写大纲',
-      kind === 'new' ? '为本书生成多少章大纲？' : '在现有大纲之后续写多少章？',
-      [
-        { text: '3 章', onPress: () => doOutline(kind, 3) },
-        { text: '5 章', onPress: () => doOutline(kind, 5) },
-        { text: '取消', style: 'cancel' },
-      ],
-    );
-  };
-  const doOutline = (kind: 'continue' | 'new', count: number) => {
-    if (!api) return;
+  /** 提交大纲生成/续写任务（弹窗里的确认按钮） */
+  const submitOutlineGenerate = () => {
+    if (!api || !outlineGen) return;
+    const kind = outlineGen;
+    const count = outlineCount;
+    setOutlineGen(null);
     const call = kind === 'new' ? api.generateOutlines(projectId, count) : api.continueOutlines(projectId, count);
     call
       .then(() => toast(`已提交大纲${kind === 'new' ? '生成' : '续写'}任务（${count} 章）`))
       .catch((e) => Alert.alert('提交失败', friendlyError(e)));
   };
+
+  /** key_points 兼容两种来源：服务端是 list[str]，网页端手填的可能是换行分隔字符串 */
+  const keyPointList = useMemo(() => {
+    const kp = outlineDetail?.key_points;
+    if (Array.isArray(kp)) return kp.map((x) => String(x ?? '').trim()).filter(Boolean);
+    if (typeof kp === 'string') return kp.split(/\n+/).map((s) => s.trim()).filter(Boolean);
+    return [];
+  }, [outlineDetail]);
+  const summaryText = typeof outlineDetail?.summary === 'string' ? outlineDetail.summary.trim() : '';
 
   if (Number.isNaN(projectId)) return null;
 
@@ -318,7 +320,10 @@ export default function ProjectScreen() {
                 <View style={{ alignItems: 'center', gap: 16 }}>
                   <EmptyState icon="map-outline" title="还没有大纲" sub="先给这本书生成前几章的大纲，再逐章生成正文" />
                   <Pressable
-                    onPress={() => submitOutlineGenerate('new')}
+                    onPress={() => {
+                      setOutlineCount(5);
+                      setOutlineGen('new');
+                    }}
                     style={{ flexDirection: 'row', alignItems: 'center', gap: 7, height: 46, paddingHorizontal: 24, borderRadius: 14, backgroundColor: C.gold }}
                   >
                     <Ionicons name="sparkles" size={16} color="#1A1206" />
@@ -328,7 +333,10 @@ export default function ProjectScreen() {
               ) : (
                 <View style={{ gap: 8 }}>
                   <Pressable
-                    onPress={() => submitOutlineGenerate('continue')}
+                    onPress={() => {
+                      setOutlineCount(5);
+                      setOutlineGen('continue');
+                    }}
                     style={({ pressed }) => ({
                       flexDirection: 'row',
                       alignItems: 'center',
@@ -415,34 +423,73 @@ export default function ProjectScreen() {
                 {outlineDetail.goal ? <Chip label={`目标 · ${outlineDetail.goal}`} /> : null}
               </View>
             )}
-            {outlineDetail.summary ? (
+            {summaryText ? (
               <View style={{ backgroundColor: '#0F121B', borderWidth: 1, borderColor: '#242A3B', borderRadius: R.m, padding: 13, gap: 6 }}>
                 <Text style={{ color: C.text2, fontSize: 12, fontWeight: '700' }}>本章摘要</Text>
-                <Text style={{ color: C.text, fontSize: 13.5, lineHeight: 22 }}>{outlineDetail.summary}</Text>
+                <Text style={{ color: C.text, fontSize: 13.5, lineHeight: 22 }}>{summaryText}</Text>
               </View>
             ) : null}
-            {outlineDetail.key_points?.trim() ? (
+            {keyPointList.length > 0 ? (
               <View style={{ backgroundColor: '#0F121B', borderWidth: 1, borderColor: '#242A3B', borderRadius: R.m, padding: 13, gap: 8 }}>
                 <Text style={{ color: C.text2, fontSize: 12, fontWeight: '700' }}>关键要点</Text>
-                {outlineDetail.key_points
-                  .split(/\n+/)
-                  .map((s) => s.trim())
-                  .filter(Boolean)
-                  .map((kp, i) => (
-                    <View key={i} style={{ flexDirection: 'row', gap: 8 }}>
-                      <Text style={{ color: C.gold, fontSize: 12.5, lineHeight: 20 }}>▪</Text>
-                      <Text style={{ color: C.text, fontSize: 13.5, lineHeight: 20, flex: 1 }}>{kp}</Text>
-                    </View>
-                  ))}
+                {keyPointList.map((kp, i) => (
+                  <View key={i} style={{ flexDirection: 'row', gap: 8 }}>
+                    <Text style={{ color: C.gold, fontSize: 12.5, lineHeight: 20 }}>▪</Text>
+                    <Text style={{ color: C.text, fontSize: 13.5, lineHeight: 20, flex: 1 }}>{kp}</Text>
+                  </View>
+                ))}
               </View>
             ) : null}
-            {!outlineDetail.summary && !outlineDetail.key_points?.trim() ? (
+            {!summaryText && keyPointList.length === 0 ? (
               <Text style={{ color: C.text3, fontSize: 12.5, lineHeight: 19, textAlign: 'center', paddingVertical: 14 }}>
                 这章大纲没有填摘要和要点
               </Text>
             ) : null}
           </View>
         ) : null}
+      </SheetModal>
+
+      {/* 生成/续写大纲：自绘弹窗选章数（原生 Alert 样式与 App 风格不符） */}
+      <SheetModal visible={outlineGen !== null} onClose={() => setOutlineGen(null)} title={outlineGen === 'new' ? '生成大纲' : '续写大纲'}>
+        <Text style={{ color: C.text3, fontSize: 12, lineHeight: 18 }}>
+          {outlineGen === 'new' ? '为本书规划开篇的大纲，生成后再逐章写正文。' : '在现有大纲之后接着往下规划，不改动已有章节。'}
+        </Text>
+        <View style={{ gap: 9 }}>
+          <FieldLabel>{outlineGen === 'new' ? '生成章数' : '续写章数'}</FieldLabel>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+            {[3, 5, 10].map((n) => {
+              const on = outlineCount === n;
+              return (
+                <Pressable
+                  key={n}
+                  onPress={() => setOutlineCount(n)}
+                  style={{
+                    paddingHorizontal: 18,
+                    height: 38,
+                    borderRadius: 13,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    backgroundColor: on ? C.goldSoft : C.card2,
+                    borderWidth: 1,
+                    borderColor: on ? 'rgba(229,181,88,0.45)' : C.border,
+                  }}
+                >
+                  <Text style={{ color: on ? C.gold : C.text2, fontSize: 13.5, fontWeight: on ? '700' : '500' }}>{n} 章</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+        <Pressable
+          onPress={submitOutlineGenerate}
+          style={{ height: 46, borderRadius: R.m, backgroundColor: C.gold, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 8 }}
+        >
+          <Ionicons name="sparkles" size={16} color="#1A1206" />
+          <Text style={{ color: '#1A1206', fontSize: 15, fontWeight: '800' }}>
+            {outlineGen === 'new' ? '生成' : '续写'} {outlineCount} 章大纲
+          </Text>
+        </Pressable>
+        <Text style={{ color: C.text3, fontSize: 11, lineHeight: 16, textAlign: 'center' }}>生成中不会占住手机，完成后在大纲列表下拉刷新</Text>
       </SheetModal>
     </SafeAreaView>
   );

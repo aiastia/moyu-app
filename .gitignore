@@ -41,3 +41,6 @@ example
 # generated native folders
 /ios
 /android
+
+# Mimosa 扫描钩子的会话状态（运行时产物）
+.mimosa/

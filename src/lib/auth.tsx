@@ -8,7 +8,7 @@ const KEY_BASE = 'moyu.baseUrl';
 const KEY_TOKEN = 'moyu.token';
 const KEY_USER = 'moyu.user';
 const KEY_REMEMBER = 'moyu.rememberPwd';
-const KEY_PASSWORD = 'moyu.savedPassword';
+const KEY_SAVED_PWD = 'moyu.savedPassword';
 
 interface AuthState {
   ready: boolean;
@@ -54,15 +54,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       [KEY_USER, JSON.stringify(user)],
       [KEY_REMEMBER, remember ? '1' : '0'],
     ];
-    if (remember) pairs.push([KEY_PASSWORD, password]);
+    if (remember) pairs.push([KEY_SAVED_PWD, password]);
     await AsyncStorage.multiSet(pairs);
-    if (!remember) await AsyncStorage.removeItem(KEY_PASSWORD).catch(() => undefined);
+    if (!remember) await AsyncStorage.removeItem(KEY_SAVED_PWD).catch(() => undefined);
     setState({ ready: true, baseUrl: base, token: access_token, user });
   }, []);
 
   const logout = useCallback(async (opts?: { keepConfig?: boolean }) => {
     const keepConfig = opts?.keepConfig !== false;
-    const keys = keepConfig ? [KEY_TOKEN] : [KEY_BASE, KEY_TOKEN, KEY_USER, KEY_REMEMBER, KEY_PASSWORD];
+    const keys = keepConfig ? [KEY_TOKEN] : [KEY_BASE, KEY_TOKEN, KEY_USER, KEY_REMEMBER, KEY_SAVED_PWD];
     await AsyncStorage.multiRemove(keys).catch(() => undefined);
     setState((s) => (keepConfig ? { ...s, token: null } : { ...s, baseUrl: null, token: null, user: null }));
   }, []);
@@ -89,7 +89,7 @@ export function useAuth(): AuthContextValue {
 /** 登录页预填：读取上次用的服务器地址/账号/记住的密码（401 过期后只需重输或一键登录） */
 export async function loadSavedLoginInfo(): Promise<{ baseUrl: string; username: string; password: string; remember: boolean }> {
   try {
-    const [[, b], [, u], [, p], [, r]] = await AsyncStorage.multiGet([KEY_BASE, KEY_USER, KEY_PASSWORD, KEY_REMEMBER]);
+    const [[, b], [, u], [, p], [, r]] = await AsyncStorage.multiGet([KEY_BASE, KEY_USER, KEY_SAVED_PWD, KEY_REMEMBER]);
     const user = u ? (JSON.parse(u) as LoginUser) : null;
     return {
       baseUrl: b ?? '',
