@@ -17,13 +17,14 @@ export default function BookshelfScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [keyword, setKeyword] = useState('');
+  const [archived, setArchived] = useState(false);
 
   const load = useCallback(
-    async (silent = false) => {
+    async (silent = false, showArchived = archived) => {
       if (!api) return;
       if (!silent) setError('');
       try {
-        const list = await api.getBooks();
+        const list = await api.getBooks({ archived: showArchived });
         setBooks(list ?? []);
         setError('');
       } catch (e) {
@@ -35,12 +36,20 @@ export default function BookshelfScreen() {
         setError(friendlyError(e));
       }
     },
-    [api, logout],
+    [api, logout, archived],
   );
 
   useEffect(() => {
+    setBooks(null);
     load();
   }, [load]);
+
+  const switchFilter = (v: boolean) => {
+    if (v === archived) return;
+    setArchived(v);
+    setBooks(null);
+    setKeyword('');
+  };
 
   // 从建书页/项目页返回时静默刷新
   useFocusEffect(
@@ -133,6 +142,33 @@ export default function BookshelfScreen() {
           ) : null}
         </View>
 
+        <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+          {[
+            { key: false, label: '连载中' },
+            { key: true, label: '已归档' },
+          ].map((f) => {
+            const on = archived === f.key;
+            return (
+              <Pressable
+                key={String(f.key)}
+                onPress={() => switchFilter(f.key)}
+                style={{
+                  paddingHorizontal: 15,
+                  height: 32,
+                  borderRadius: 16,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  backgroundColor: on ? C.goldSoft : C.card,
+                  borderWidth: 1,
+                  borderColor: on ? 'rgba(229,181,88,0.4)' : C.borderSoft,
+                }}
+              >
+                <Text style={{ color: on ? C.gold : C.text2, fontSize: 12.5, fontWeight: on ? '700' : '500' }}>{f.label}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+
         {books === null && !error ? (
           <View style={{ flex: 1 }}>
             <Skeleton count={4} height={128} />
@@ -168,8 +204,10 @@ export default function BookshelfScreen() {
             ListEmptyComponent={
               keyword ? (
                 <EmptyState icon="search-outline" title="没有匹配的作品" sub="换个关键词试试" />
+              ) : archived ? (
+                <EmptyState icon="archive-outline" title="没有归档的作品" sub="在网页端归档的书会出现在这里" />
               ) : (
-                <EmptyState title="书架还是空的" sub="在网页端创建你的第一本书，手机端即可同步看到" />
+                <EmptyState title="书架还是空的" sub="点右上角 + 创建第一本书，或先在网页端创建" />
               )
             }
             ListFooterComponent={refreshing ? <ActivityIndicator color={C.gold} style={{ marginTop: 10 }} /> : null}

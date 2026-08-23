@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { Chip, EmptyState, ProgressBar, ScreenHeader, Skeleton, useToast } from '@/components/ui';
+import { Chip, EmptyState, ProgressBar, ScreenHeader, SheetModal, Skeleton, useToast } from '@/components/ui';
 import type { TaskItem } from '@/lib/api';
 import { ApiError } from '@/lib/api';
 import { friendlyError, useAuth } from '@/lib/auth';
@@ -34,22 +34,12 @@ function statusStyle(status: string): { fg: string; bg: string } {
   }
 }
 
-function TaskCard({
-  task,
-  onCancel,
-  onRetry,
-  onDelete,
-}: {
-  task: TaskItem;
-  onCancel: (t: TaskItem) => void;
-  onRetry: (t: TaskItem) => void;
-  onDelete: (t: TaskItem) => void;
-}) {
+function TaskCard({ task, onPress, onCancel, onRetry }: { task: TaskItem; onPress: () => void; onCancel: (t: TaskItem) => void; onRetry: (t: TaskItem) => void }) {
   const s = statusStyle(task.status);
   const active = task.status === 'running' || task.status === 'pending';
   return (
     <Pressable
-      onPress={task.project_id ? () => router.push({ pathname: '/project/[id]', params: { id: String(task.project_id) } }) : undefined}
+      onPress={onPress}
       style={({ pressed }) => ({
         backgroundColor: pressed ? C.card2 : C.card,
         borderRadius: R.l,
@@ -103,23 +93,109 @@ function TaskCard({
             <Text style={{ color: C.gold, fontSize: 12, fontWeight: '700' }}>重试</Text>
           </Pressable>
         ) : null}
-        {!active ? (
+        <Ionicons name="chevron-forward" size={13} color={C.text3} />
+      </View>
+    </Pressable>
+  );
+}
+
+function InfoLine({ label, value }: { label: string; value?: string | null }) {
+  if (!value) return null;
+  return (
+    <View style={{ flexDirection: 'row', gap: 12 }}>
+      <Text style={{ color: C.text3, fontSize: 12, width: 60, paddingTop: 2 }}>
+        {label}
+      </Text>
+      <Text style={{ color: C.text2, fontSize: 12.5, lineHeight: 19, flex: 1 }}>{value}</Text>
+    </View>
+  );
+}
+
+function TaskDetailSheet({
+  task,
+  onClose,
+  onCancel,
+  onRetry,
+  onDelete,
+}: {
+  task: TaskItem | null;
+  onClose: () => void;
+  onCancel: (t: TaskItem) => void;
+  onRetry: (t: TaskItem) => void;
+  onDelete: (t: TaskItem) => void;
+}) {
+  if (!task) return null;
+  const s = statusStyle(task.status);
+  const active = task.status === 'running' || task.status === 'pending';
+  return (
+    <SheetModal visible onClose={onClose} title={`任务 #${task.id}`}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+        <Text style={{ color: C.text, fontSize: 15, fontWeight: '800', flex: 1 }} numberOfLines={2}>
+          {task.title || task.task_type}
+        </Text>
+        <Chip label={STATUS_LABEL[task.status] ?? task.status} fg={s.fg} bg={s.bg} bold />
+      </View>
+
+      {active ? (
+        <View style={{ gap: 7 }}>
+          <ProgressBar pct={task.progress ?? 0} color={task.status === 'running' ? C.blue : C.text3} />
+          <Text style={{ color: C.text3, fontSize: 11 }}>
+            {task.status === 'running' ? `${task.progress ?? 0}%` : task.queue_position ? `排队中 · 第 ${task.queue_position} 位` : '排队中'}
+          </Text>
+        </View>
+      ) : null}
+
+      <InfoLine label="阶段" value={task.stage} />
+      <InfoLine label="状态说明" value={task.status_message} />
+      {task.error ? (
+        <View style={{ backgroundColor: C.sealSoft, borderRadius: 10, padding: 11, gap: 4 }}>
+          <Text style={{ color: C.seal, fontSize: 11, fontWeight: '700' }}>错误信息</Text>
+          <Text style={{ color: C.seal, fontSize: 12, lineHeight: 18 }}>{task.error}</Text>
+        </View>
+      ) : null}
+      <InfoLine label="创建" value={task.created_at ? fmtRelative(task.created_at) : undefined} />
+      <InfoLine label="开始" value={task.started_at ? fmtRelative(task.started_at) : undefined} />
+      <InfoLine label="完成" value={task.completed_at ? fmtRelative(task.completed_at) : undefined} />
+      <InfoLine label="重试次数" value={task.retry_count != null && task.max_retries != null ? `${task.retry_count}/${task.max_retries}` : undefined} />
+
+      <View style={{ flexDirection: 'row', gap: 10, marginTop: 4, flexWrap: 'wrap' }}>
+        {active && !task.cancel_requested ? (
           <Pressable
-            onPress={() => onDelete(task)}
-            hitSlop={6}
-            style={{ paddingHorizontal: 11, height: 30, borderRadius: 10, backgroundColor: C.card2, borderWidth: 1, borderColor: C.border, alignItems: 'center', justifyContent: 'center' }}
+            onPress={() => onCancel(task)}
+            style={{ height: 40, paddingHorizontal: 16, borderRadius: 12, backgroundColor: C.card2, borderWidth: 1, borderColor: C.border, alignItems: 'center', justifyContent: 'center' }}
           >
-            <Text style={{ color: C.text3, fontSize: 12, fontWeight: '600' }}>删除</Text>
+            <Text style={{ color: C.text2, fontSize: 13, fontWeight: '600' }}>取消任务</Text>
+          </Pressable>
+        ) : null}
+        {task.status === 'failed' ? (
+          <Pressable
+            onPress={() => onRetry(task)}
+            style={{ height: 40, paddingHorizontal: 16, borderRadius: 12, backgroundColor: C.goldSoft, borderWidth: 1, borderColor: 'rgba(229,181,88,0.4)', alignItems: 'center', justifyContent: 'center' }}
+          >
+            <Text style={{ color: C.gold, fontSize: 13, fontWeight: '700' }}>重试</Text>
           </Pressable>
         ) : null}
         {task.project_id ? (
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
-            <Text style={{ color: C.gold, fontSize: 11 }}>项目</Text>
-            <Ionicons name="chevron-forward" size={11} color={C.gold} />
-          </View>
+          <Pressable
+            onPress={() => {
+              onClose();
+              router.push({ pathname: '/project/[id]', params: { id: String(task.project_id) } });
+            }}
+            style={{ height: 40, paddingHorizontal: 16, borderRadius: 12, backgroundColor: C.blueSoft, borderWidth: 1, borderColor: 'rgba(106,166,232,0.4)', alignItems: 'center', justifyContent: 'center' }}
+          >
+            <Text style={{ color: C.blue, fontSize: 13, fontWeight: '700' }}>去项目</Text>
+          </Pressable>
+        ) : null}
+        {!active ? (
+          <Pressable
+            onPress={() => onDelete(task)}
+            style={{ height: 40, paddingHorizontal: 16, borderRadius: 12, backgroundColor: C.sealSoft, borderWidth: 1, borderColor: 'rgba(214,90,69,0.4)', alignItems: 'center', justifyContent: 'center' }}
+          >
+            <Text style={{ color: C.seal, fontSize: 13, fontWeight: '700' }}>删除记录</Text>
+          </Pressable>
         ) : null}
       </View>
-    </Pressable>
+    </SheetModal>
   );
 }
 
@@ -130,6 +206,7 @@ export default function TasksScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [toast, toastNode] = useToast();
+  const [detailTask, setDetailTask] = useState<TaskItem | null>(null);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const load = useCallback(
@@ -139,6 +216,8 @@ export default function TasksScreen() {
       try {
         const list = await api.getTasks(filter ? { status: filter } : undefined);
         setTasks(list ?? []);
+        // 详情弹层打开时同步刷新其中的任务
+        setDetailTask((prev) => (prev ? (list ?? []).find((t) => t.id === prev.id) ?? prev : null));
         setError('');
       } catch (e) {
         if (e instanceof ApiError && e.status === 401) {
@@ -242,6 +321,7 @@ export default function TasksScreen() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: C.bg }} edges={['top']}>
       {toastNode}
+      <TaskDetailSheet task={detailTask} onClose={() => setDetailTask(null)} onCancel={doCancel} onRetry={doRetry} onDelete={doDelete} />
       <View style={{ paddingHorizontal: SP.l, paddingTop: 10, gap: 14, flex: 1 }}>
         <ScreenHeader
           title="任务"
@@ -293,7 +373,9 @@ export default function TasksScreen() {
             refreshControl={<RefreshControl refreshing={refreshing} tintColor={C.gold} colors={[C.gold]} onRefresh={onRefresh} />}
           >
             {tasks?.length ? (
-              tasks.map((t) => <TaskCard key={t.id} task={t} onCancel={doCancel} onRetry={doRetry} onDelete={doDelete} />)
+              tasks.map((t) => (
+                <TaskCard key={t.id} task={t} onPress={() => setDetailTask(t)} onCancel={doCancel} onRetry={doRetry} />
+              ))
             ) : (
               <EmptyState icon="flash-outline" title="暂无任务" sub="在网页端发起章节生成、润色等操作后，可以在这里盯进度" />
             )}

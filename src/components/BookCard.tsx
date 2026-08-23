@@ -31,6 +31,7 @@ export function BookCard({ book, onPress }: { book: Book; onPress: () => void })
         <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
           {book.tag ? <Chip label={book.tag} fg={C.gold} bg={C.goldSoft} bold /> : null}
           <Chip label={kind} fg={book.story_kind === 'short' ? C.purple : C.blue} bg={book.story_kind === 'short' ? C.purpleSoft : C.blueSoft} />
+          {book.status === 'archived' ? <Chip label="已归档" fg={C.text3} bg={C.card2} /> : null}
         </View>
         {book.desc ? (
           <Text style={{ color: C.text2, fontSize: 12, lineHeight: 17 }} numberOfLines={2}>

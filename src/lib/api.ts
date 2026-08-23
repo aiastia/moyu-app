@@ -109,6 +109,11 @@ export interface TaskItem {
   status_message?: string | null;
   cancel_requested?: boolean;
   error?: string | null;
+  stage?: string | null;
+  queue_position?: number | null;
+  started_at?: string | null;
+  retry_count?: number | null;
+  max_retries?: number | null;
   created_at?: string | null;
   completed_at?: string | null;
 }
@@ -261,8 +266,8 @@ export class Api {
     return (await res.json()) as T;
   }
 
-  getBooks() {
-    return this.req<Book[]>('/api/books');
+  getBooks(opts?: { archived?: boolean }) {
+    return this.req<Book[]>(`/api/books${opts?.archived ? '?archived=true' : ''}`);
   }
 
   getProject(id: number) {

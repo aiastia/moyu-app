@@ -1,7 +1,3 @@
-// 注意：字体必须用命名导入（该子路径文件是 export const，无默认导出——默认导入运行时是
-// undefined，会让字体加载失败）。v1.2.1 曾因此卡死在启动页。
-import { NotoSerifSC_400Regular } from '@expo-google-fonts/noto-serif-sc/400Regular';
-import { useFonts } from '@expo-google-fonts/noto-serif-sc/useFonts';
 import { DarkTheme, Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
@@ -19,8 +15,7 @@ const navTheme = {
 
 function Root() {
   const { ready } = useAuth();
-  // 字体（14.8MB 思源宋体）后台加载，不阻塞启动；未就绪时宋体选项自动回退系统字体
-  useFonts({ NotoSerifSC: NotoSerifSC_400Regular });
+  // 字体用系统字体（国产 ROM 默认字体已很好，省 14.8MB 包体；阅读器宋体选项跟随设备字体）
 
   // 只等登录态读取（AsyncStorage，几十毫秒），避免闪登录页
   useEffect(() => {

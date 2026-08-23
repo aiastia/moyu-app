@@ -114,7 +114,8 @@ export default function ReaderScreen() {
   };
 
   const paragraphs = useMemo(() => (chapter?.content ? chapter.content.split(/\n+/).map((s) => s.trim()).filter(Boolean) : []), [chapter]);
-  const bodyFont = prefs.serif ? 'NotoSerifSC' : undefined;
+  // 宋体模式跟随设备衬线字体（无衬线中文字体的机型自动回退默认字体）
+  const bodyFont = prefs.serif ? 'serif' : undefined;
   const lineGap = Math.round(prefs.fontSize * 0.95);
 
   return (
@@ -315,7 +316,7 @@ export default function ReaderScreen() {
           </View>
 
           <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-            <Text style={{ color: C.text2, fontSize: 13, flex: 1 }}>宋体正文（思源宋体）</Text>
+            <Text style={{ color: C.text2, fontSize: 13, flex: 1 }}>宋体正文（跟随设备字体）</Text>
             <Pressable
               onPress={() => updatePrefs({ serif: !prefs.serif })}
               style={{

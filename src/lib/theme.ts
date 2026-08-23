@@ -1,5 +1,3 @@
-import { Platform } from 'react-native';
-
 /** 墨色主题：深墨底 + 鎏金点缀 + 朱砂印 */
 export const C = {
   bg: '#0B0D13',
@@ -59,8 +57,3 @@ export const COVER_GRADIENTS: readonly [string, string][] = [
   ['#33202E', '#2E1F38'],
   ['#2E2A1E', '#1F3028'],
 ];
-
-export const fontFamily = Platform.select({
-  android: { sans: 'sans-serif', serif: 'serif' },
-  default: { sans: 'system-ui', serif: 'serif' },
-});
