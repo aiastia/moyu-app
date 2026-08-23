@@ -1,4 +1,6 @@
-import { NotoSerifSC_400Regular, useFonts } from '@expo-google-fonts/noto-serif-sc';
+// 注意：只从子路径引入单个字重（约14.8MB）。若从包根导入，全部9个字重会被打进APK（+120MB）
+import NotoSerifSC_400Regular from '@expo-google-fonts/noto-serif-sc/400Regular';
+import { useFonts } from '@expo-google-fonts/noto-serif-sc/useFonts';
 import { DarkTheme, Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
