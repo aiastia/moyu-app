@@ -1,12 +1,13 @@
-// 注意：只从子路径引入单个字重（约14.8MB）。若从包根导入，全部9个字重会被打进APK（+120MB）
-import NotoSerifSC_400Regular from '@expo-google-fonts/noto-serif-sc/400Regular';
+// 注意：字体必须用命名导入（该子路径文件是 export const，无默认导出——默认导入运行时是
+// undefined，会让字体加载失败）。v1.2.1 曾因此卡死在启动页。
+import { NotoSerifSC_400Regular } from '@expo-google-fonts/noto-serif-sc/400Regular';
 import { useFonts } from '@expo-google-fonts/noto-serif-sc/useFonts';
 import { DarkTheme, Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 
-import { AuthProvider } from '@/lib/auth';
+import { AuthProvider, useAuth } from '@/lib/auth';
 import { C } from '@/lib/theme';
 
 SplashScreen.preventAutoHideAsync().catch(() => undefined);
@@ -16,22 +17,20 @@ const navTheme = {
   colors: { ...DarkTheme.colors, background: C.bg, card: C.card, text: C.text, border: C.border, primary: C.gold },
 };
 
-export const unstable_settings = {
-  anchor: '(tabs)',
-};
+function Root() {
+  const { ready } = useAuth();
+  // 字体（14.8MB 思源宋体）后台加载，不阻塞启动；未就绪时宋体选项自动回退系统字体
+  useFonts({ NotoSerifSC: NotoSerifSC_400Regular });
 
-export default function RootLayout() {
-  const [fontsLoaded] = useFonts({ NotoSerifSC: NotoSerifSC_400Regular });
-
+  // 只等登录态读取（AsyncStorage，几十毫秒），避免闪登录页
   useEffect(() => {
-    if (fontsLoaded) SplashScreen.hideAsync().catch(() => undefined);
-  }, [fontsLoaded]);
+    if (ready) SplashScreen.hideAsync().catch(() => undefined);
+  }, [ready]);
 
-  // 字体包很大（思源宋体 CJK），等待期间保持启动图
-  if (!fontsLoaded) return null;
+  if (!ready) return null;
 
   return (
-    <AuthProvider>
+    <>
       <StatusBar style="light" />
       <Stack
         screenOptions={{
@@ -48,6 +47,18 @@ export default function RootLayout() {
         <Stack.Screen name="reader" options={{ animation: 'slide_from_bottom', animationDuration: 260 }} />
         <Stack.Screen name="editor" />
       </Stack>
+    </>
+  );
+}
+
+export const unstable_settings = {
+  anchor: '(tabs)',
+};
+
+export default function RootLayout() {
+  return (
+    <AuthProvider>
+      <Root />
     </AuthProvider>
   );
 }
