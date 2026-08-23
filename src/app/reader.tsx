@@ -2,15 +2,15 @@ import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Modal, Pressable, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { ChapterFull, ChapterNav } from '@/lib/api';
 import { ApiError } from '@/lib/api';
 import { friendlyError, loadReaderPrefs, saveLastRead, saveReaderPrefs, useAuth } from '@/lib/auth';
-import { useToast } from '@/components/ui';
+import { SheetModal, useToast } from '@/components/ui';
 import { getChapterVersion } from '@/lib/version';
-import { C, DEFAULT_READER_PREFS, READER_THEMES, type ReaderPrefs } from '@/lib/theme';
+import { C, DEFAULT_READER_PREFS, READER_FONTS, READER_THEMES, type ReaderPrefs } from '@/lib/theme';
 
 export default function ReaderScreen() {
   const { projectId: pid, chapterId: cid, canGenerate, reason } = useLocalSearchParams<{
@@ -114,8 +114,7 @@ export default function ReaderScreen() {
   };
 
   const paragraphs = useMemo(() => (chapter?.content ? chapter.content.split(/\n+/).map((s) => s.trim()).filter(Boolean) : []), [chapter]);
-  // 宋体模式跟随设备衬线字体（无衬线中文字体的机型自动回退默认字体）
-  const bodyFont = prefs.serif ? 'serif' : undefined;
+  const bodyFont = useMemo(() => READER_FONTS.find((f) => f.key === prefs.fontKey)?.fontFamily, [prefs.fontKey]);
   const lineGap = Math.round(prefs.fontSize * 0.95);
 
   return (
@@ -266,72 +265,73 @@ export default function ReaderScreen() {
       </View>
 
       {/* 阅读设置面板 */}
-      <Modal visible={panelOpen} transparent animationType="slide" onRequestClose={() => setPanelOpen(false)}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)' }} onPress={() => setPanelOpen(false)} />
-        <View style={{ backgroundColor: '#141826', paddingHorizontal: 22, paddingTop: 20, paddingBottom: insets.bottom + 20, borderTopLeftRadius: 24, borderTopRightRadius: 24, gap: 20 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-            <Text style={{ color: C.text, fontSize: 15, fontWeight: '800', flex: 1 }}>阅读设置</Text>
-            <Pressable onPress={() => setPanelOpen(false)} hitSlop={8}>
-              <Ionicons name="close" size={21} color={C.text2} />
-            </Pressable>
-          </View>
+      <SheetModal visible={panelOpen} onClose={() => setPanelOpen(false)} title="阅读设置">
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+          <Text style={{ color: C.text2, fontSize: 13, width: 44 }}>字号</Text>
+          <Pressable
+            onPress={() => updatePrefs({ fontSize: Math.max(14, prefs.fontSize - 1) })}
+            style={{ width: 40, height: 40, borderRadius: 13, backgroundColor: C.card2, alignItems: 'center', justifyContent: 'center' }}
+          >
+            <Text style={{ color: C.text, fontSize: 15 }}>A-</Text>
+          </Pressable>
+          <Text style={{ color: C.gold, fontSize: 16, fontWeight: '800', flex: 1, textAlign: 'center' }}>{prefs.fontSize}</Text>
+          <Pressable
+            onPress={() => updatePrefs({ fontSize: Math.min(28, prefs.fontSize + 1) })}
+            style={{ width: 40, height: 40, borderRadius: 13, backgroundColor: C.card2, alignItems: 'center', justifyContent: 'center' }}
+          >
+            <Text style={{ color: C.text, fontSize: 17 }}>A+</Text>
+          </Pressable>
+        </View>
 
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
-            <Text style={{ color: C.text2, fontSize: 13, width: 44 }}>字号</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+          <Text style={{ color: C.text2, fontSize: 13, width: 44 }}>背景</Text>
+          {READER_THEMES.map((t) => (
             <Pressable
-              onPress={() => updatePrefs({ fontSize: Math.max(14, prefs.fontSize - 1) })}
-              style={{ width: 40, height: 40, borderRadius: 13, backgroundColor: C.card2, alignItems: 'center', justifyContent: 'center' }}
-            >
-              <Text style={{ color: C.text, fontSize: 15 }}>A-</Text>
-            </Pressable>
-            <Text style={{ color: C.gold, fontSize: 16, fontWeight: '800', flex: 1, textAlign: 'center' }}>{prefs.fontSize}</Text>
-            <Pressable
-              onPress={() => updatePrefs({ fontSize: Math.min(28, prefs.fontSize + 1) })}
-              style={{ width: 40, height: 40, borderRadius: 13, backgroundColor: C.card2, alignItems: 'center', justifyContent: 'center' }}
-            >
-              <Text style={{ color: C.text, fontSize: 17 }}>A+</Text>
-            </Pressable>
-          </View>
-
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
-            <Text style={{ color: C.text2, fontSize: 13, width: 44 }}>背景</Text>
-            {READER_THEMES.map((t) => (
-              <Pressable
-                key={t.key}
-                onPress={() => updatePrefs({ theme: t.key })}
-                style={{
-                  width: 44,
-                  height: 44,
-                  borderRadius: 14,
-                  backgroundColor: t.bg,
-                  borderWidth: 2,
-                  borderColor: prefs.theme === t.key ? C.gold : '#2A3042',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <Text style={{ color: t.text, fontSize: 10 }}>{t.name}</Text>
-              </Pressable>
-            ))}
-          </View>
-
-          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-            <Text style={{ color: C.text2, fontSize: 13, flex: 1 }}>宋体正文（跟随设备字体）</Text>
-            <Pressable
-              onPress={() => updatePrefs({ serif: !prefs.serif })}
+              key={t.key}
+              onPress={() => updatePrefs({ theme: t.key })}
               style={{
-                width: 50,
-                height: 30,
-                borderRadius: 15,
-                backgroundColor: prefs.serif ? C.gold : '#2A3042',
-                padding: 3,
+                width: 44,
+                height: 44,
+                borderRadius: 14,
+                backgroundColor: t.bg,
+                borderWidth: 2,
+                borderColor: prefs.theme === t.key ? C.gold : '#2A3042',
+                alignItems: 'center',
+                justifyContent: 'center',
               }}
             >
-              <View style={{ width: 24, height: 24, borderRadius: 12, backgroundColor: '#fff', alignSelf: prefs.serif ? 'flex-end' : 'flex-start' }} />
+              <Text style={{ color: t.text, fontSize: 10 }}>{t.name}</Text>
             </Pressable>
+          ))}
+        </View>
+
+        <View style={{ gap: 9 }}>
+          <Text style={{ color: C.text2, fontSize: 13 }}>字体（系统自带，设备支持哪个呈现哪个）</Text>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+            {READER_FONTS.map((f) => {
+              const on = prefs.fontKey === f.key;
+              return (
+                <Pressable
+                  key={f.key}
+                  onPress={() => updatePrefs({ fontKey: f.key })}
+                  style={{
+                    paddingHorizontal: 14,
+                    height: 36,
+                    borderRadius: 12,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    backgroundColor: on ? C.goldSoft : C.card2,
+                    borderWidth: 1,
+                    borderColor: on ? 'rgba(229,181,88,0.45)' : C.border,
+                  }}
+                >
+                  <Text style={{ color: on ? C.gold : C.text2, fontSize: 14, fontWeight: '600', fontFamily: f.fontFamily }}>{f.label}</Text>
+                </Pressable>
+              );
+            })}
           </View>
         </View>
-      </Modal>
+      </SheetModal>
     </View>
   );
 }

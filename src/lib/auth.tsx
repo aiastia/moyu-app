@@ -116,7 +116,14 @@ const KEY_PREFS = 'moyu.readerPrefs';
 export async function loadReaderPrefs(): Promise<ReaderPrefs> {
   try {
     const raw = await AsyncStorage.getItem(KEY_PREFS);
-    if (raw) return { ...DEFAULT_READER_PREFS, ...JSON.parse(raw) };
+    if (raw) {
+      const saved = JSON.parse(raw);
+      // 旧版偏好迁移：serif 布尔 → fontKey
+      if (saved && typeof saved.serif === 'boolean' && !saved.fontKey) {
+        saved.fontKey = saved.serif ? 'serif' : 'default';
+      }
+      return { ...DEFAULT_READER_PREFS, ...saved };
+    }
   } catch { /* ignore */ }
   return DEFAULT_READER_PREFS;
 }

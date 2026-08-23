@@ -199,13 +199,25 @@ export function Input({
   );
 }
 
-/** 底部弹层表单壳 */
+/** 底部弹层表单壳：整层半透明遮罩 + 圆角面板浮在上面（圆角缺口透出遮罩色，不会露白边） */
 export function SheetModal({ visible, onClose, title, children }: { visible: boolean; onClose: () => void; title: string; children: React.ReactNode }) {
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <View style={{ flex: 1, justifyContent: 'flex-end' }}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)' }} onPress={onClose} />
-        <View style={{ backgroundColor: '#141826', borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 20, paddingTop: 18, paddingBottom: 36, maxHeight: '88%', borderWidth: 1, borderColor: '#262C3F' }}>
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose} statusBarTranslucent navigationBarTranslucent>
+      <Pressable style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={onClose}>
+        {/* 内层 Pressable 拦截点击，防止点表单误关闭 */}
+        <Pressable
+          style={{
+            backgroundColor: '#141826',
+            borderTopLeftRadius: 24,
+            borderTopRightRadius: 24,
+            paddingHorizontal: 20,
+            paddingTop: 18,
+            paddingBottom: 36,
+            maxHeight: '88%',
+            borderWidth: 1,
+            borderColor: '#262C3F',
+          }}
+        >
           <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 14 }}>
             <Text style={{ color: C.text, fontSize: 16, fontWeight: '800', flex: 1 }}>{title}</Text>
             <Pressable onPress={onClose} hitSlop={8}>
@@ -215,8 +227,8 @@ export function SheetModal({ visible, onClose, title, children }: { visible: boo
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 12, paddingBottom: 6 }}>
             {children}
           </ScrollView>
-        </View>
-      </View>
+        </Pressable>
+      </Pressable>
     </Modal>
   );
 }

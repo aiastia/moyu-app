@@ -41,13 +41,23 @@ export const READER_THEMES = [
 ] as const;
 export type ReaderThemeKey = (typeof READER_THEMES)[number]['key'];
 
+/** 阅读器系统字体（安卓通用字体族，设备支持哪个呈现哪个） */
+export const READER_FONTS: { key: string; label: string; fontFamily?: string }[] = [
+  { key: 'default', label: '默认' },
+  { key: 'light', label: '细体', fontFamily: 'sans-serif-light' },
+  { key: 'medium', label: '中黑', fontFamily: 'sans-serif-medium' },
+  { key: 'serif', label: '宋体', fontFamily: 'serif' },
+  { key: 'cursive', label: '手写', fontFamily: 'cursive' },
+  { key: 'mono', label: '等宽', fontFamily: 'monospace' },
+];
+
 export interface ReaderPrefs {
   fontSize: number;
   theme: ReaderThemeKey;
-  serif: boolean;
+  fontKey: string;
 }
 
-export const DEFAULT_READER_PREFS: ReaderPrefs = { fontSize: 18, theme: 'night', serif: false };
+export const DEFAULT_READER_PREFS: ReaderPrefs = { fontSize: 18, theme: 'night', fontKey: 'default' };
 
 /** 封面兜底渐变组（按项目ID取模），深色系配鎏金/朱砂/黛蓝 */
 export const COVER_GRADIENTS: readonly [string, string][] = [
