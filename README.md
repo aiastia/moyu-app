@@ -63,6 +63,8 @@ npm run icons           # 修改 assets-src/*.svg 后重新渲染各尺寸图标
 
 签名材料只存放在 GitHub Actions secrets 中（仓库不携带 keystore 与密码），构建时由 `scripts/apply-signing.js` 解码注入，保证每次 APK 签名一致、可直接覆盖升级。需要自行构建正式签名包时，在仓库 Settings → Secrets and variables → Actions 配置三项：`MOYU_KEYSTORE_BASE64`（keystore 文件的 base64，`base64 < your.jks` 生成）、`MOYU_KEYSTORE_PASSWORD`、`MOYU_KEYSTORE_ALIAS`；未配置时构建自动回落 debug 签名。
 
+历史版本的仓库中曾内置过明文密钥（已删除文件与密码，且迁移到 secrets 后继续沿用同一密钥以保证老包可直接覆盖升级）；git 历史中仍可翻到旧密钥，若在意这一点可彻底轮换：本地 `keytool -genkeypair -storetype pkcs12 -keystore new.jks -alias moyu ...` 生成新密钥后，用 `base64 < new.jks` 更新 `MOYU_KEYSTORE_BASE64` 与 `MOYU_KEYSTORE_PASSWORD` 两个 secrets 即可——代价是已安装用户需卸载旧包后重装（签名变更无法覆盖升级）。
+
 ## 许可
 
 MIT
