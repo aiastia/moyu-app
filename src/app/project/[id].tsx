@@ -19,6 +19,27 @@ import { C, R, SP } from '@/lib/theme';
 
 type TabKey = 'chapters' | 'outlines' | 'characters' | 'world' | 'foreshadow' | 'about';
 
+/** 大纲场景（服务端 scenes 数组的单条），编辑表单里的可变形态 */
+type OutlineSceneEdit = { scene_title: string; scene_desc: string; emotion: string };
+
+/** 服务端 scenes/characters 原始数据 → 展示/编辑形态（脏数据兜底为空） */
+function toSceneEdits(raw: unknown): OutlineSceneEdit[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((s) => {
+    const o = (s ?? {}) as Record<string, unknown>;
+    return {
+      scene_title: typeof o.scene_title === 'string' ? o.scene_title : '',
+      scene_desc: typeof o.scene_desc === 'string' ? o.scene_desc : '',
+      emotion: typeof o.emotion === 'string' ? o.emotion : '',
+    };
+  });
+}
+
+function toNameList(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((x) => (typeof x === 'string' ? x : typeof x === 'number' ? String(x) : ((x as Record<string, unknown>)?.name as string) ?? '')).filter(Boolean);
+}
+
 const TABS = [
   { key: 'chapters', label: '章节' },
   { key: 'outlines', label: '大纲' },
@@ -58,7 +79,7 @@ export default function ProjectScreen() {
   const [confirm, confirmNode] = useConfirm();
   const [coverVersion, setCoverVersion] = useState(0);
   /** 大纲编辑表单（null=详情弹窗处于只读态） */
-  const [outlineEdit, setOutlineEdit] = useState<{ title: string; summary: string; emotion: string; goal: string; keyPoints: string } | null>(null);
+  const [outlineEdit, setOutlineEdit] = useState<{ title: string; summary: string; emotion: string; goal: string; keyPoints: string; scenes: OutlineSceneEdit[]; charactersText: string; orgsText: string } | null>(null);
   const [outlineSaving, setOutlineSaving] = useState(false);
 
   const guard = useCallback(
@@ -190,6 +211,9 @@ export default function ProjectScreen() {
       emotion: outlineDetail.emotion ?? '',
       goal: outlineDetail.goal ?? '',
       keyPoints: kpText,
+      scenes: toSceneEdits(outlineDetail.scenes),
+      charactersText: toNameList(outlineDetail.characters).join('，'),
+      orgsText: toNameList(outlineDetail.organizations).join('，'),
     });
   };
 
@@ -202,6 +226,12 @@ export default function ProjectScreen() {
     const emotion = outlineEdit.emotion.trim();
     const goal = outlineEdit.goal.trim();
     const keyPoints = outlineEdit.keyPoints.split('\n').map((s) => s.trim()).filter(Boolean);
+    const scenes = outlineEdit.scenes
+      .map((s) => ({ scene_title: s.scene_title.trim(), scene_desc: s.scene_desc.trim(), emotion: s.emotion.trim() }))
+      .filter((s) => s.scene_title || s.scene_desc || s.emotion);
+    const splitNames = (t: string) => t.split(/[,，、\n]+/).map((s) => s.trim()).filter(Boolean);
+    const characters = splitNames(outlineEdit.charactersText);
+    const organizations = splitNames(outlineEdit.orgsText);
     api
       .updateOutline(projectId, outlineDetail.id, {
         chapter_number: outlineDetail.chapter_number,
@@ -210,13 +240,13 @@ export default function ProjectScreen() {
         emotion,
         goal,
         key_points: keyPoints,
-        scenes: outlineDetail.scenes ?? [],
-        characters: outlineDetail.characters ?? [],
-        organizations: outlineDetail.organizations ?? [],
+        scenes,
+        characters,
+        organizations,
         structure: { ...(outlineDetail.structure ?? {}), title, summary, emotion, goal, key_points: keyPoints },
       })
       .then(() => {
-        const updated: OutlineItem = { ...outlineDetail, title, summary, emotion, goal, key_points: keyPoints };
+        const updated: OutlineItem = { ...outlineDetail, title, summary, emotion, goal, key_points: keyPoints, scenes, characters, organizations };
         setOutlineDetail(updated);
         setOutlines((prev) => (prev ? prev.map((o) => (o.id === updated.id ? updated : o)) : prev));
         setOutlineEdit(null);
@@ -236,6 +266,10 @@ export default function ProjectScreen() {
     return [];
   }, [outlineDetail]);
   const summaryText = typeof outlineDetail?.summary === 'string' ? outlineDetail.summary.trim() : '';
+  /** 详情只读态的场景/角色/组织（与网页端大纲页对齐，App 此前只显示摘要+要点） */
+  const detailScenes = useMemo(() => toSceneEdits(outlineDetail?.scenes), [outlineDetail]);
+  const detailCharacters = useMemo(() => toNameList(outlineDetail?.characters), [outlineDetail]);
+  const detailOrgs = useMemo(() => toNameList(outlineDetail?.organizations), [outlineDetail]);
 
   /** 章节列表元素缓存：打开弹窗/Toast/切分栏等界面态变化不重渲整张章列表 */
   const chapterList = useMemo(
@@ -430,7 +464,8 @@ export default function ProjectScreen() {
                         <Text style={{ color: C.text, fontSize: 13.5, fontWeight: '700', flex: 1 }} numberOfLines={1}>
                           {o.title || '未命名'}
                         </Text>
-                        {o.emotion ? <Chip label={o.emotion} /> : null}
+                        {/* 情绪是一长串"xx→xx→xx"，不限宽会把标题挤没（只见情绪不见标题） */}
+                        {o.emotion ? <Chip label={o.emotion} maxWidth={150} /> : null}
                         <Ionicons name="chevron-forward" size={14} color={C.text3} />
                       </View>
                       {o.summary ? (
@@ -514,6 +549,55 @@ export default function ProjectScreen() {
                 <FieldLabel>关键要点（每行一条）</FieldLabel>
                 <Input value={outlineEdit.keyPoints} onChangeText={(v) => setOutlineEdit((f) => (f ? { ...f, keyPoints: v } : f))} placeholder={'主角发现线索\n与反派正面冲突'} multiline height={130} />
               </View>
+              <View style={{ gap: 9 }}>
+                <FieldLabel>场景（{outlineEdit.scenes.length}）</FieldLabel>
+                {outlineEdit.scenes.map((s, i) => (
+                  <View key={i} style={{ backgroundColor: '#0F121B', borderWidth: 1, borderColor: '#242A3B', borderRadius: R.m, padding: 11, gap: 8 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <Text style={{ color: C.text3, fontSize: 11.5, fontWeight: '700' }}>场景 {i + 1}</Text>
+                      <View style={{ flex: 1 }} />
+                      <Pressable
+                        onPress={() => setOutlineEdit((f) => (f ? { ...f, scenes: f.scenes.filter((_, j) => j !== i) } : f))}
+                        hitSlop={6}
+                        style={{ width: 26, height: 26, borderRadius: 9, backgroundColor: C.sealSoft, alignItems: 'center', justifyContent: 'center' }}
+                      >
+                        <Ionicons name="close" size={14} color={C.seal} />
+                      </Pressable>
+                    </View>
+                    <View style={{ flexDirection: 'row', gap: 8 }}>
+                      <View style={{ flex: 1.4, gap: 6 }}>
+                        <FieldLabel>场景标题</FieldLabel>
+                        <Input value={s.scene_title} onChangeText={(v) => setOutlineEdit((f) => (f ? { ...f, scenes: f.scenes.map((sc, j) => (j === i ? { ...sc, scene_title: v } : sc)) } : f))} placeholder="如：祠堂夜谈" />
+                      </View>
+                      <View style={{ flex: 1, gap: 6 }}>
+                        <FieldLabel>情绪</FieldLabel>
+                        <Input value={s.emotion} onChangeText={(v) => setOutlineEdit((f) => (f ? { ...f, scenes: f.scenes.map((sc, j) => (j === i ? { ...sc, emotion: v } : sc)) } : f))} placeholder="如：压抑" />
+                      </View>
+                    </View>
+                    <View style={{ gap: 6 }}>
+                      <FieldLabel>场景描述</FieldLabel>
+                      <Input value={s.scene_desc} onChangeText={(v) => setOutlineEdit((f) => (f ? { ...f, scenes: f.scenes.map((sc, j) => (j === i ? { ...sc, scene_desc: v } : sc)) } : f))} placeholder="这个场景里发生什么" multiline height={72} />
+                    </View>
+                  </View>
+                ))}
+                <Pressable
+                  onPress={() => setOutlineEdit((f) => (f ? { ...f, scenes: [...f.scenes, { scene_title: '', scene_desc: '', emotion: '' }] } : f))}
+                  style={{ height: 38, borderRadius: 12, borderWidth: 1, borderStyle: 'dashed', borderColor: 'rgba(229,181,88,0.5)', alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 6 }}
+                >
+                  <Ionicons name="add" size={14} color={C.gold} />
+                  <Text style={{ color: C.gold, fontSize: 13, fontWeight: '600' }}>添加场景</Text>
+                </Pressable>
+              </View>
+              <View style={{ flexDirection: 'row', gap: 10 }}>
+                <View style={{ flex: 1, gap: 7 }}>
+                  <FieldLabel>出场角色（逗号分隔）</FieldLabel>
+                  <Input value={outlineEdit.charactersText} onChangeText={(v) => setOutlineEdit((f) => (f ? { ...f, charactersText: v } : f))} placeholder="温鹤延，满仓" />
+                </View>
+                <View style={{ flex: 1, gap: 7 }}>
+                  <FieldLabel>涉及组织（逗号分隔）</FieldLabel>
+                  <Input value={outlineEdit.orgsText} onChangeText={(v) => setOutlineEdit((f) => (f ? { ...f, orgsText: v } : f))} placeholder="沧澜宗" />
+                </View>
+              </View>
               <View style={{ flexDirection: 'row', gap: 10, marginTop: 2 }}>
                 <Pressable
                   onPress={() => setOutlineEdit(null)}
@@ -536,8 +620,8 @@ export default function ProjectScreen() {
             <View style={{ gap: 12 }}>
             {(outlineDetail.emotion || outlineDetail.goal) && (
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-                {outlineDetail.emotion ? <Chip label={`情绪 · ${outlineDetail.emotion}`} fg={C.gold} bg={C.goldSoft} /> : null}
-                {outlineDetail.goal ? <Chip label={`目标 · ${outlineDetail.goal}`} /> : null}
+                {outlineDetail.emotion ? <Chip label={`情绪 · ${outlineDetail.emotion}`} fg={C.gold} bg={C.goldSoft} maxWidth="78%" /> : null}
+                {outlineDetail.goal ? <Chip label={`目标 · ${outlineDetail.goal}`} maxWidth="78%" /> : null}
               </View>
             )}
             {summaryText ? (
@@ -557,7 +641,45 @@ export default function ProjectScreen() {
                 ))}
               </View>
             ) : null}
-            {!summaryText && keyPointList.length === 0 ? (
+            {detailScenes.length > 0 ? (
+              <View style={{ backgroundColor: '#0F121B', borderWidth: 1, borderColor: '#242A3B', borderRadius: R.m, padding: 13, gap: 10 }}>
+                <Text style={{ color: C.text2, fontSize: 12, fontWeight: '700' }}>场景（{detailScenes.length}）</Text>
+                {detailScenes.map((s, i) => (
+                  <View key={i} style={{ gap: 4 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <Text style={{ color: C.text, fontSize: 13, fontWeight: '700', flex: 1 }} numberOfLines={1}>
+                        {i + 1}. {s.scene_title || '未命名场景'}
+                      </Text>
+                      {s.emotion ? <Chip label={s.emotion} maxWidth={130} /> : null}
+                    </View>
+                    {s.scene_desc ? (
+                      <Text style={{ color: C.text2, fontSize: 12.5, lineHeight: 19 }}>{s.scene_desc}</Text>
+                    ) : null}
+                  </View>
+                ))}
+              </View>
+            ) : null}
+            {detailCharacters.length > 0 || detailOrgs.length > 0 ? (
+              <View style={{ backgroundColor: '#0F121B', borderWidth: 1, borderColor: '#242A3B', borderRadius: R.m, padding: 13, gap: 8 }}>
+                {detailCharacters.length > 0 ? (
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+                    <Text style={{ color: C.text2, fontSize: 12, fontWeight: '700' }}>角色</Text>
+                    {detailCharacters.map((n, i) => (
+                      <Chip key={i} label={n} maxWidth={140} />
+                    ))}
+                  </View>
+                ) : null}
+                {detailOrgs.length > 0 ? (
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+                    <Text style={{ color: C.text2, fontSize: 12, fontWeight: '700' }}>组织</Text>
+                    {detailOrgs.map((n, i) => (
+                      <Chip key={i} label={n} fg={C.blue} bg={C.blueSoft} maxWidth={140} />
+                    ))}
+                  </View>
+                ) : null}
+              </View>
+            ) : null}
+            {!summaryText && keyPointList.length === 0 && detailScenes.length === 0 ? (
               <Text style={{ color: C.text3, fontSize: 12.5, lineHeight: 19, textAlign: 'center', paddingVertical: 14 }}>
                 这章大纲没有填摘要和要点
               </Text>

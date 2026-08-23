@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import React, { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { Animated, Modal, Pressable, ScrollView, Text, TextInput, View, useWindowDimensions, type ViewStyle } from 'react-native';
+import { Animated, Modal, Pressable, ScrollView, Text, TextInput, View, useWindowDimensions, type DimensionValue, type ViewStyle } from 'react-native';
 
 import { C, R } from '@/lib/theme';
 
@@ -100,10 +100,11 @@ export function useConfirm(): [(opts: ConfirmOptions) => void, ReactNode] {
   return [show, node];
 }
 
-/** 小标签 */
-export function Chip({ label, fg = C.text2, bg = C.card2, bold = false }: { label: string; fg?: string; bg?: string; bold?: boolean }) {
+/** 小标签。maxWidth 用于长文本 chip（如大纲情绪是一长串"xx→xx→xx"），不限制会把同行
+ *  的标题挤没（大纲列表行"只见情绪不见标题"的根因） */
+export function Chip({ label, fg = C.text2, bg = C.card2, bold = false, maxWidth }: { label: string; fg?: string; bg?: string; bold?: boolean; maxWidth?: DimensionValue }) {
   return (
-    <View style={{ paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, backgroundColor: bg }}>
+    <View style={{ paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, backgroundColor: bg, maxWidth }}>
       <Text style={{ color: fg, fontSize: 11, fontWeight: bold ? '700' : '500' }} numberOfLines={1}>
         {label}
       </Text>
@@ -240,15 +241,33 @@ export function FieldLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
+/** 多行长文本的初始光标归顶：安卓 EditText 用 value/defaultValue 设入长文本后光标落在
+ *  末尾并把视口滚到最后（"打开表单看到的是结尾不是开头"），挂载瞬间给 selection(0,0)
+ *  把视口带回顶部，随即将 selection 交还给非受控态，不影响后续手动移动光标 */
+function useInitialSelectionToTop(multiline?: boolean) {
+  const [sel, setSel] = useState<{ start: number; end: number } | undefined>(undefined);
+  const applied = useRef(false);
+  useEffect(() => {
+    if (!multiline || applied.current) return;
+    applied.current = true;
+    setSel({ start: 0, end: 0 });
+    const t = setTimeout(() => setSel(undefined), 150);
+    return () => clearTimeout(t);
+  }, [multiline]);
+  return sel;
+}
+
 /** 统一样式的文本输入框 */
 export function Input({
   height,
   ...rest
 }: React.ComponentProps<typeof TextInput> & { height?: number }) {
+  const initialSel = useInitialSelectionToTop(rest.multiline);
   return (
     <TextInput
       placeholderTextColor="#5A6170"
       keyboardAppearance="dark"
+      selection={initialSel}
       {...rest}
       style={[
         {
