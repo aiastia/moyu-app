@@ -97,11 +97,21 @@ export interface CharacterItem {
   appearance?: string | null;
   personality?: string | null;
   background?: string | null;
+  growth_experience?: string | null;
   ability?: string | null;
   story_goal?: string | null;
   motivation?: string | null;
   weakness?: string | null;
+  arc_type?: string | null;
+  character_change?: string | null;
+  speech_style?: string | null;
   status?: string | null;
+  mental_state?: string | null;
+  main_career_id?: number | null;
+  main_career_stage?: number | null;
+  main_career_stage_desc?: string | null;
+  sub_careers?: unknown[] | null;
+  organization_id?: number | null;
   reference_image?: string | null;
   reference_prompt?: string | null;
 }
@@ -179,24 +189,67 @@ export interface CharacterBody {
   motivation?: string;
   weakness?: string;
   speech_style?: string;
+  mental_state?: string;
+  arc_type?: string;
+  character_change?: string;
+  growth_experience?: string;
   status?: string;
+  /** 以下为服务端 CharacterCreate 的全量字段：PUT 是全量覆盖语义，编辑时必须原样回传 */
+  main_career_id?: number | null;
+  main_career_stage?: number;
+  main_career_stage_desc?: string;
+  sub_careers?: unknown[];
+  organization_id?: number | null;
 }
 
 export interface ForeshadowBody {
   title: string;
   content?: string;
   foreshadow_type?: string;
+  status?: string;
+  source_type?: string;
   priority?: number;
   plant_chapter_number?: number | null;
   target_resolve_chapter_number?: number | null;
+  /** 扩展字段：关联角色/暗示文本/备注/长线伏笔等（与网页端同口径存 structure JSON） */
+  structure?: Record<string, unknown>;
+}
+
+/** 核心世界观（存于 Project 上的四维度设定，网页端世界观页第一张卡） */
+export interface WorldCore {
+  world_time_period: string;
+  world_location: string;
+  world_atmosphere: string;
+  world_rules: string;
+}
+
+/** 项目元信息编辑（网页端仪表盘「项目信息卡」同款字段；status 用于归档/恢复） */
+export interface ProjectUpdateBody {
+  title?: string;
+  genre?: string;
+  synopsis?: string;
+  narrative_pov?: string;
+  target_word_count?: number;
+  target_platform?: string;
+  pen_name?: string;
+  status?: string;
 }
 
 export const FORESHADOW_STATUS_LABEL: Record<string, string> = {
   pending: '计划中',
   planted: '已埋入',
   resolved: '已回收',
-  partial: '部分回收',
+  partially_resolved: '部分回收',
+  missed: '漏埋',
   abandoned: '已放弃',
+};
+
+/** 角色生死状态 → 展示文案（网页端角色卡同款） */
+export const CHARACTER_STATUS_LABEL: Record<string, string> = {
+  alive: '存活',
+  dead: '死亡',
+  missing: '失踪',
+  unknown: '未知',
 };
 
 export class ApiError extends Error {
@@ -281,6 +334,14 @@ export class Api {
     return this.req<ProjectDetail>(`/api/projects/${id}`);
   }
 
+  /** 编辑项目元信息（书名/笔名/题材/视角/目标平台/字数/简介），status 传 archived/active 做归档恢复 */
+  updateProject(id: number, body: ProjectUpdateBody) {
+    return this.req<{ ok: boolean }>(`/api/projects/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    });
+  }
+
   getChapters(projectId: number) {
     return this.req<ChapterRow[]>(`/api/projects/${projectId}/chapters`);
   }
@@ -289,7 +350,7 @@ export class Api {
     return this.req<ChapterFull>(`/api/projects/${projectId}/chapters/${chapterId}`);
   }
 
-  updateChapter(projectId: number, chapterId: number, body: { title?: string; content?: string }) {
+  updateChapter(projectId: number, chapterId: number, body: { title?: string; content?: string; status?: string }) {
     return this.req<{ ok: boolean }>(`/api/projects/${projectId}/chapters/${chapterId}`, {
       method: 'PUT',
       body: JSON.stringify(body),
@@ -365,7 +426,9 @@ export class Api {
     });
   }
 
-  updateCharacter(projectId: number, characterId: number, body: Partial<CharacterBody>) {
+  /** 编辑角色。服务端 PUT 按 CharacterCreate 全量覆盖：网页端设置的职业境界/所属组织/
+   *  成长经历等 App 表单没有的字段，调用方必须从列表数据原样带回，否则会被默认空值清掉。 */
+  updateCharacter(projectId: number, characterId: number, body: CharacterBody) {
     return this.req<unknown>(`/api/projects/${projectId}/characters/${characterId}`, {
       method: 'PUT',
       body: JSON.stringify(body),
@@ -443,6 +506,27 @@ export class Api {
     return this.req<{ categories: string[] }>(`/api/projects/${projectId}/worlds/categories`);
   }
 
+  // ===== 核心世界观（时间/地点/氛围/规则，存于 Project） =====
+  getWorldCore(projectId: number) {
+    return this.req<WorldCore>(`/api/projects/${projectId}/world-core`);
+  }
+
+  /** 手动编辑核心世界观（四字段部分更新，服务端只改传入的键） */
+  updateWorldCore(projectId: number, body: Partial<WorldCore>) {
+    return this.req<{ ok: boolean }>(`/api/projects/${projectId}/world-core`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    });
+  }
+
+  /** AI 重新生成核心世界观（异步任务，返回 task_id；会覆盖现有四项） */
+  generateWorldCoreAsync(projectId: number) {
+    return this.req<{ task_id: number }>(`/api/projects/${projectId}/world-core/generate-async`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+  }
+
   /** AI 生成详细世界设定条目（同步接口，AI 跑完才返回，调用方需 loading 态） */
   generateWorlds(projectId: number, body: { idea?: string }) {
     return this.req<{ count: number; items: { name: string; category: string }[] }>(`/api/projects/${projectId}/worlds/generate`, {
@@ -464,6 +548,8 @@ export class Api {
     });
   }
 
+  /** 编辑伏笔。服务端 PUT 按 ForeshadowCreate 全量覆盖：status/source_type/structure
+   *  未回传会被重置（状态退回计划中、来源变手动），编辑时必须从原数据带回。 */
   updateForeshadow(projectId: number, foreshadowId: number, body: ForeshadowBody) {
     return this.req<{ ok: boolean }>(`/api/projects/${projectId}/foreshadows/${foreshadowId}`, {
       method: 'PUT',

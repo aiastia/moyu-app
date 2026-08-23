@@ -112,6 +112,21 @@ export function Chip({ label, fg = C.text2, bg = C.card2, bold = false, maxWidth
   );
 }
 
+/** 开关行：左侧标签+说明、右侧自绘拨杆（表单里的布尔项，替代系统 Switch 保持风格统一） */
+export function Toggle({ label, hint, value, onChange }: { label: string; hint?: string; value: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <Pressable onPress={() => onChange(!value)} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 4 }}>
+      <View style={{ flex: 1, gap: 1 }}>
+        <Text style={{ color: C.text, fontSize: 14, fontWeight: '600' }}>{label}</Text>
+        {hint ? <Text style={{ color: C.text3, fontSize: 11 }}>{hint}</Text> : null}
+      </View>
+      <View style={{ width: 46, height: 27, borderRadius: 14, backgroundColor: value ? C.gold : '#2A3042', padding: 3 }}>
+        <View style={{ width: 21, height: 21, borderRadius: 11, backgroundColor: '#fff', alignSelf: value ? 'flex-end' : 'flex-start' }} />
+      </View>
+    </Pressable>
+  );
+}
+
 /** 空状态 */
 export function EmptyState({ icon = 'library-outline', title, sub }: { icon?: keyof typeof Ionicons.glyphMap; title: string; sub?: string }) {
   return (

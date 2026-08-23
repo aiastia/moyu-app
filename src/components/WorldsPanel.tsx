@@ -1,18 +1,29 @@
 import { Ionicons } from '@expo/vector-icons';
+import { router } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 
 import { Chip, EmptyState, FieldLabel, Input, SelectField, SheetModal, Skeleton, useConfirm, useToast } from '@/components/ui';
-import type { WorldItem } from '@/lib/api';
+import type { WorldCore, WorldItem } from '@/lib/api';
 import { ApiError } from '@/lib/api';
 import { friendlyError, useAuth } from '@/lib/auth';
 import { C, R } from '@/lib/theme';
 
-/** 世界观设定面板：列表 + 手动新建/编辑/删除 + AI 生成一批设定 */
+const CORE_FIELDS: { key: keyof WorldCore; label: string; placeholder: string }[] = [
+  { key: 'world_time_period', label: '时间设定', placeholder: '时代背景、纪年方式…' },
+  { key: 'world_location', label: '地点设定', placeholder: '世界观的核心舞台…' },
+  { key: 'world_atmosphere', label: '氛围设定', placeholder: '整体基调与气质…' },
+  { key: 'world_rules', label: '规则设定', placeholder: '力量体系、社会法则…' },
+];
+
+/** 世界观设定面板：核心世界观（时间/地点/氛围/规则）+ 详细条目列表 */
 export function WorldsPanel({ projectId }: { projectId: number }) {
   const { api, logout } = useAuth();
   const [items, setItems] = useState<WorldItem[] | null>(null);
   const [categories, setCategories] = useState<string[]>([]);
+  const [core, setCore] = useState<WorldCore | null>(null);
+  const [coreEdit, setCoreEdit] = useState<WorldCore | null>(null);
+  const [coreSaving, setCoreSaving] = useState(false);
   const [editing, setEditing] = useState<WorldItem | 'new' | null>(null);
   const [name, setName] = useState('');
   const [category, setCategory] = useState('');
@@ -27,8 +38,9 @@ export function WorldsPanel({ projectId }: { projectId: number }) {
   const load = useCallback(async () => {
     if (!api) return;
     try {
-      const list = await api.getWorlds(projectId);
+      const [list, worldCore] = await Promise.all([api.getWorlds(projectId), api.getWorldCore(projectId).catch(() => null)]);
       setItems(list ?? []);
+      setCore(worldCore);
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) {
         await logout();
@@ -44,6 +56,41 @@ export function WorldsPanel({ projectId }: { projectId: number }) {
     api?.getWorldCategories(projectId).then((r) => setCategories(r.categories ?? [])).catch(() => undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
+
+  /** 保存核心世界观（四字段手动编辑） */
+  const saveCore = () => {
+    if (!api || !coreEdit || coreSaving) return;
+    setCoreSaving(true);
+    api
+      .updateWorldCore(projectId, coreEdit)
+      .then(() => {
+        setCore(coreEdit);
+        setCoreEdit(null);
+        toast('核心世界观已保存');
+      })
+      .catch((e) => toast(friendlyError(e)))
+      .finally(() => setCoreSaving(false));
+  };
+
+  /** AI 重新生成核心世界观（异步任务，会覆盖现有四项） */
+  const regenCore = () => {
+    if (!api) return;
+    confirm({
+      title: 'AI 重新生成核心世界观',
+      message: 'AI 会根据本书简介与已有设定重新生成时间/地点/氛围/规则四项，覆盖现有内容。确定提交吗？',
+      confirmText: '提交生成',
+      onConfirm: () => {
+        api
+          .generateWorldCoreAsync(projectId)
+          .then(() => {
+            setCoreEdit(null);
+            toast('已提交世界观生成任务，可在「任务」页看进度');
+            router.navigate('/tasks');
+          })
+          .catch((e) => toast(friendlyError(e)));
+      },
+    });
+  };
 
   const openNew = () => {
     setEditing('new');
@@ -167,6 +214,41 @@ export function WorldsPanel({ projectId }: { projectId: number }) {
         </Pressable>
       </View>
 
+      {/* 核心世界观（时间/地点/氛围/规则，存于项目；网页端世界观页第一张卡） */}
+      {core !== null ? (
+        <Pressable
+          onPress={() => setCoreEdit(core)}
+          style={({ pressed }) => ({
+            backgroundColor: pressed ? C.card2 : C.card,
+            borderWidth: 1,
+            borderColor: 'rgba(95,191,143,0.28)',
+            borderRadius: R.m,
+            padding: 13,
+            gap: 8,
+          })}
+        >
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Ionicons name="planet-outline" size={15} color={C.green} />
+            <Text style={{ color: C.text, fontSize: 14, fontWeight: '800', flex: 1 }}>核心世界观</Text>
+            <Ionicons name="create-outline" size={14} color={C.text3} />
+          </View>
+          {CORE_FIELDS.every((f) => !core[f.key]) ? (
+            <Text style={{ color: C.text3, fontSize: 12, lineHeight: 18 }}>
+              还没填时间/地点/氛围/规则四项设定，点开手动填写，或让 AI 生成
+            </Text>
+          ) : (
+            CORE_FIELDS.filter((f) => core[f.key]).map((f) => (
+              <View key={f.key} style={{ gap: 3 }}>
+                <Text style={{ color: C.green, fontSize: 11.5, fontWeight: '700' }}>{f.label}</Text>
+                <Text style={{ color: C.text2, fontSize: 12, lineHeight: 18 }} numberOfLines={2}>
+                  {core[f.key]}
+                </Text>
+              </View>
+            ))
+          )}
+        </Pressable>
+      ) : null}
+
       {items === null ? (
         <Skeleton count={4} height={84} />
       ) : items.length === 0 ? (
@@ -226,6 +308,41 @@ export function WorldsPanel({ projectId }: { projectId: number }) {
             style={{ flex: 1, height: 44, borderRadius: R.m, backgroundColor: C.gold, alignItems: 'center', justifyContent: 'center' }}
           >
             <Text style={{ color: '#1A1206', fontSize: 14.5, fontWeight: '800' }}>{saving ? '保存中…' : '保存'}</Text>
+          </Pressable>
+        </View>
+      </SheetModal>
+
+      {/* 核心世界观编辑：四项设定 + AI 重新生成 */}
+      <SheetModal visible={coreEdit !== null} onClose={() => setCoreEdit(null)} title="核心世界观">
+        <Text style={{ color: C.text3, fontSize: 12, lineHeight: 18 }}>
+          四项核心设定会作为最高优先级背景注入大纲与正文生成。
+        </Text>
+        {CORE_FIELDS.map((f) => (
+          <View key={f.key} style={{ gap: 7 }}>
+            <FieldLabel>{f.label}</FieldLabel>
+            <Input
+              value={coreEdit?.[f.key] ?? ''}
+              onChangeText={(v) => setCoreEdit((c) => (c ? { ...c, [f.key]: v } : c))}
+              placeholder={f.placeholder}
+              multiline
+              height={84}
+            />
+          </View>
+        ))}
+        <View style={{ flexDirection: 'row', gap: 10, marginTop: 4 }}>
+          <Pressable
+            onPress={regenCore}
+            style={{ height: 44, paddingHorizontal: 16, borderRadius: R.m, backgroundColor: C.blueSoft, borderWidth: 1, borderColor: 'rgba(106,166,232,0.4)', alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 6 }}
+          >
+            <Ionicons name="sparkles" size={14} color={C.blue} />
+            <Text style={{ color: C.blue, fontSize: 13.5, fontWeight: '700' }}>AI 重新生成</Text>
+          </Pressable>
+          <Pressable
+            onPress={saveCore}
+            disabled={coreSaving}
+            style={{ flex: 1, height: 44, borderRadius: R.m, backgroundColor: C.gold, alignItems: 'center', justifyContent: 'center' }}
+          >
+            <Text style={{ color: '#1A1206', fontSize: 14.5, fontWeight: '800' }}>{coreSaving ? '保存中…' : '保存'}</Text>
           </Pressable>
         </View>
       </SheetModal>

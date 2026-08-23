@@ -6,7 +6,7 @@ import { Pressable, Text, View } from 'react-native';
 import { Chip, EmptyState, FieldLabel, Input, SelectField, SheetModal, Skeleton, useConfirm, useToast } from '@/components/ui';
 import { PortraitSheet } from '@/components/PortraitSheet';
 import type { CharacterBody, CharacterItem } from '@/lib/api';
-import { ApiError } from '@/lib/api';
+import { ApiError, CHARACTER_STATUS_LABEL } from '@/lib/api';
 import { friendlyError, useAuth } from '@/lib/auth';
 import { C, R } from '@/lib/theme';
 
@@ -21,6 +21,20 @@ const GENDER_OPTIONS = [
   { value: '男', label: '男' },
   { value: '女', label: '女' },
 ];
+const STATUS_OPTIONS = [
+  { value: 'alive', label: '存活' },
+  { value: 'dead', label: '死亡' },
+  { value: 'missing', label: '失踪' },
+  { value: 'unknown', label: '未知' },
+];
+const ARC_OPTIONS = [
+  { value: '', label: '不填' },
+  { value: '成长', label: '成长' },
+  { value: '堕落', label: '堕落' },
+  { value: '救赎', label: '救赎' },
+  { value: '顿悟', label: '顿悟' },
+  { value: '平淡', label: '平淡' },
+];
 
 const ROLE_COLOR: Record<string, { fg: string; bg: string }> = {
   主角: { fg: '#E5B558', bg: 'rgba(229,181,88,0.13)' },
@@ -30,12 +44,33 @@ const ROLE_COLOR: Record<string, { fg: string; bg: string }> = {
   反派: { fg: '#D65A45', bg: 'rgba(214,90,69,0.14)' },
 };
 
+const EMPTY_FORM: CharacterBody = {
+  name: '',
+  role: '配角',
+  gender: '',
+  age: '',
+  identity: '',
+  appearance: '',
+  personality: '',
+  background: '',
+  growth_experience: '',
+  ability: '',
+  story_goal: '',
+  motivation: '',
+  weakness: '',
+  arc_type: '',
+  character_change: '',
+  speech_style: '',
+  mental_state: '',
+  status: 'alive',
+};
+
 /** 角色面板：列表 + 手动新建/编辑/删除 + AI 批量生成 */
 export function CharactersPanel({ projectId }: { projectId: number }) {
   const { api, logout } = useAuth();
   const [items, setItems] = useState<CharacterItem[] | null>(null);
   const [editing, setEditing] = useState<CharacterItem | 'new' | null>(null);
-  const [form, setForm] = useState<CharacterBody>({ name: '', role: '配角', gender: '', age: '', identity: '', appearance: '', personality: '', background: '', ability: '', story_goal: '', motivation: '', weakness: '' });
+  const [form, setForm] = useState<CharacterBody>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [toast, toastNode] = useToast();
   const [confirm, confirmNode] = useConfirm();
@@ -70,7 +105,7 @@ export function CharactersPanel({ projectId }: { projectId: number }) {
 
   const openNew = () => {
     setEditing('new');
-    setForm({ name: '', role: '配角', gender: '', age: '', identity: '', appearance: '', personality: '', background: '', ability: '', story_goal: '', motivation: '', weakness: '' });
+    setForm(EMPTY_FORM);
   };
 
   const openEdit = (c: CharacterItem) => {
@@ -84,10 +119,16 @@ export function CharactersPanel({ projectId }: { projectId: number }) {
       appearance: c.appearance ?? '',
       personality: c.personality ?? '',
       background: c.background ?? '',
+      growth_experience: c.growth_experience ?? '',
       ability: c.ability ?? '',
       story_goal: c.story_goal ?? '',
       motivation: c.motivation ?? '',
       weakness: c.weakness ?? '',
+      arc_type: c.arc_type ?? '',
+      character_change: c.character_change ?? '',
+      speech_style: c.speech_style ?? '',
+      mental_state: c.mental_state ?? '',
+      status: c.status || 'alive',
     });
   };
 
@@ -99,10 +140,26 @@ export function CharactersPanel({ projectId }: { projectId: number }) {
     }
     setSaving(true);
     try {
-      if (editing === 'new') {
-        await api.createCharacter(projectId, { ...form, name: form.name.trim() });
+      const cur = editing === 'new' ? null : editing;
+      // 服务端 PUT 按 CharacterCreate 全量覆盖：App 表单没覆盖的职业/组织关联字段
+      // 必须从列表数据原样带回，否则网页端设置的境界、所属组织会被默认空值清掉
+      const body: CharacterBody = {
+        ...form,
+        name: form.name.trim(),
+        ...(cur
+          ? {
+              main_career_id: cur.main_career_id ?? null,
+              main_career_stage: cur.main_career_stage ?? 0,
+              main_career_stage_desc: cur.main_career_stage_desc ?? '',
+              sub_careers: cur.sub_careers ?? [],
+              organization_id: cur.organization_id ?? null,
+            }
+          : {}),
+      };
+      if (cur) {
+        await api.updateCharacter(projectId, cur.id, body);
       } else {
-        await api.updateCharacter(projectId, editing.id, { ...form, name: form.name.trim() });
+        await api.createCharacter(projectId, body);
       }
       setEditing(null);
       toast('已保存');
@@ -199,6 +256,7 @@ export function CharactersPanel({ projectId }: { projectId: number }) {
       ) : (
         items.map((c) => {
           const rc = ROLE_COLOR[c.role] ?? { fg: '#A78BFA', bg: 'rgba(167,139,250,0.13)' };
+          const dead = c.status && c.status !== 'alive';
           return (
             <Pressable
               key={c.id}
@@ -216,7 +274,7 @@ export function CharactersPanel({ projectId }: { projectId: number }) {
                 <Text style={{ color: C.text, fontSize: 14.5, fontWeight: '800' }}>{c.name}</Text>
                 {c.role ? <Chip label={c.role} fg={rc.fg} bg={rc.bg} /> : null}
                 {c.gender ? <Chip label={c.gender} /> : null}
-                {c.status && c.status !== 'alive' ? <Chip label={c.status} fg={C.text3} /> : null}
+                {dead ? <Chip label={CHARACTER_STATUS_LABEL[c.status!] ?? c.status!} fg={C.seal} bg={C.sealSoft} /> : null}
                 <View style={{ flex: 1 }} />
                 <Pressable
                   onPress={() => setPortraitChar(c)}
@@ -241,6 +299,11 @@ export function CharactersPanel({ projectId }: { projectId: number }) {
                   {c.identity}
                 </Text>
               ) : null}
+              {c.main_career_stage_desc ? (
+                <Text style={{ color: C.gold, fontSize: 11.5 }} numberOfLines={1}>
+                  主修 · {c.main_career_stage_desc}
+                </Text>
+              ) : null}
               {c.personality ? (
                 <Text style={{ color: C.text3, fontSize: 11.5, lineHeight: 17 }} numberOfLines={2}>
                   {c.personality}
@@ -255,7 +318,14 @@ export function CharactersPanel({ projectId }: { projectId: number }) {
         <FieldLabel>姓名 *</FieldLabel>
         <Input value={form.name ?? ''} onChangeText={(v) => set({ name: v })} placeholder="角色姓名" />
 
-        <SelectField label="定位" value={form.role ?? ''} options={ROLES.map((r) => ({ value: r, label: r }))} onChange={(v) => set({ role: v })} />
+        <View style={{ flexDirection: 'row', gap: 10 }}>
+          <View style={{ flex: 1 }}>
+            <SelectField label="定位" value={form.role ?? ''} options={ROLES.map((r) => ({ value: r, label: r }))} onChange={(v) => set({ role: v })} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <SelectField label="状态" value={form.status || 'alive'} options={STATUS_OPTIONS} onChange={(v) => set({ status: v })} />
+          </View>
+        </View>
 
         <View style={{ flexDirection: 'row', gap: 10 }}>
           <View style={{ width: 120 }}>
@@ -273,10 +343,19 @@ export function CharactersPanel({ projectId }: { projectId: number }) {
         <Input value={form.personality ?? ''} onChangeText={(v) => set({ personality: v })} placeholder="性格关键词" multiline height={80} />
         <FieldLabel>外貌</FieldLabel>
         <Input value={form.appearance ?? ''} onChangeText={(v) => set({ appearance: v })} placeholder="外貌特征" multiline height={80} />
+        <FieldLabel>说话风格</FieldLabel>
+        <Input value={form.speech_style ?? ''} onChangeText={(v) => set({ speech_style: v })} placeholder="如：语速慢、爱用反问" />
+        <FieldLabel>当前心理</FieldLabel>
+        <Input value={form.mental_state ?? ''} onChangeText={(v) => set({ mental_state: v })} placeholder="此刻的心理状态（剧情分析会自动更新）" />
         <FieldLabel>能力</FieldLabel>
         <Input value={form.ability ?? ''} onChangeText={(v) => set({ ability: v })} placeholder="金手指/功法/特长" multiline height={80} />
         <FieldLabel>背景</FieldLabel>
         <Input value={form.background ?? ''} onChangeText={(v) => set({ background: v })} placeholder="出身与经历" multiline height={100} />
+        <FieldLabel>成长经历</FieldLabel>
+        <Input value={form.growth_experience ?? ''} onChangeText={(v) => set({ growth_experience: v })} placeholder="关键转折点（剧情分析会自动更新）" multiline height={80} />
+        <SelectField label="变化类型" value={form.arc_type ?? ''} options={ARC_OPTIONS} onChange={(v) => set({ arc_type: v })} />
+        <FieldLabel>人物变化轨迹</FieldLabel>
+        <Input value={form.character_change ?? ''} onChangeText={(v) => set({ character_change: v })} placeholder="开篇→结局的转变（随章节自动累积）" multiline height={80} />
         <FieldLabel>故事目标</FieldLabel>
         <Input value={form.story_goal ?? ''} onChangeText={(v) => set({ story_goal: v })} placeholder="TA 想达成什么" multiline height={70} />
         <FieldLabel>动机</FieldLabel>

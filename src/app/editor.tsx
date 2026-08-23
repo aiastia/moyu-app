@@ -4,11 +4,17 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Keyboard, PanResponder, Pressable, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { SelectField } from '@/components/ui';
 import type { ChapterFull } from '@/lib/api';
 import { ApiError } from '@/lib/api';
 import { friendlyError, useAuth } from '@/lib/auth';
 import { C, R, SP } from '@/lib/theme';
 import { bumpChapterVersion } from '@/lib/version';
+
+const STATUS_OPTIONS = [
+  { value: 'draft', label: '草稿', hint: '创作中，还会继续修改' },
+  { value: 'completed', label: '已完成', hint: '定稿章节（生成完默认置为已完成）' },
+];
 
 export default function EditorScreen() {
   const { projectId: pid, chapterId: cid } = useLocalSearchParams<{ projectId: string; chapterId: string }>();
@@ -18,6 +24,7 @@ export default function EditorScreen() {
 
   const [chapter, setChapter] = useState<ChapterFull | null>(null);
   const [title, setTitle] = useState('');
+  const [status, setStatus] = useState('draft');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -30,15 +37,21 @@ export default function EditorScreen() {
   const [stats, setStats] = useState({ len: 0, dirty: false });
   const statsTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const isDirtyNow = () =>
-    !!chapter && (titleRef.current !== (chapter.title ?? '') || contentRef.current !== (chapter.content ?? ''));
+  /** statusOverride：切状态时事件闭包里的新值（此时 state 里的 status 还没更新） */
+  const isDirtyNow = (statusOverride?: string) =>
+    !!chapter &&
+    (titleRef.current !== (chapter.title ?? '') ||
+      contentRef.current !== (chapter.content ?? '') ||
+      (statusOverride ?? status) !== (chapter.status ?? 'draft'));
 
-  const touchStats = () => {
+  const scheduleStats = (statusOverride?: string) => {
     if (statsTimer.current) clearTimeout(statsTimer.current);
     statsTimer.current = setTimeout(() => {
-      setStats({ len: contentRef.current.length, dirty: isDirtyNow() });
+      setStats({ len: contentRef.current.length, dirty: isDirtyNow(statusOverride) });
     }, 300);
   };
+
+  const touchStats = () => scheduleStats();
 
   // ===== 键盘收起 + 全文快速跳转 =====
   const [kbVisible, setKbVisible] = useState(false);
@@ -89,6 +102,7 @@ export default function EditorScreen() {
       const ch = await api.getChapter(projectId, chapterId);
       setChapter(ch);
       setTitle(ch.title ?? '');
+      setStatus(ch.status || 'draft');
       titleRef.current = ch.title ?? '';
       contentRef.current = ch.content ?? '';
       setStats({ len: (ch.content ?? '').length, dirty: false });
@@ -116,12 +130,12 @@ export default function EditorScreen() {
     const content = contentRef.current;
     const trimmedTitle = titleRef.current.trim();
     // 以按下瞬间的实时内容判断，不被 300ms 防抖卡住
-    if (!chapter || (trimmedTitle === (chapter.title ?? '') && content === (chapter.content ?? ''))) return;
+    if (!chapter || (trimmedTitle === (chapter.title ?? '') && content === (chapter.content ?? '') && status === (chapter.status ?? 'draft'))) return;
     setSaving(true);
     try {
-      await api.updateChapter(projectId, chapterId, { title: trimmedTitle, content });
+      await api.updateChapter(projectId, chapterId, { title: trimmedTitle, content, status });
       bumpChapterVersion(projectId, chapterId);
-      setChapter((c) => (c ? { ...c, title: trimmedTitle, content, word_count: content.length } : c));
+      setChapter((c) => (c ? { ...c, title: trimmedTitle, content, status, word_count: content.length } : c));
       setStats({ len: content.length, dirty: false });
       setSaved(true);
       savedTimer.current = setTimeout(() => setSaved(false), 1800);
@@ -211,6 +225,16 @@ export default function EditorScreen() {
               placeholder="章节标题"
               placeholderTextColor="#5A6170"
               style={{ color: C.text, fontSize: 16, fontWeight: '700', borderBottomWidth: 1, borderBottomColor: C.borderSoft, paddingBottom: 10 }}
+            />
+            <SelectField
+              label="状态"
+              value={status || 'draft'}
+              options={STATUS_OPTIONS}
+              onChange={(v) => {
+                setStatus(v);
+                // 只切状态不改正文时脏标记也要亮起：闭包里拿新值 v 走同一防抖
+                scheduleStats(v);
+              }}
             />
             <View style={{ flexDirection: 'row', gap: 6, flex: 1 }}>
               <TextInput

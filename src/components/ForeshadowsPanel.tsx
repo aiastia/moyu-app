@@ -3,7 +3,7 @@ import { router } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 
-import { Chip, EmptyState, FieldLabel, Input, SelectField, SheetModal, Skeleton, useConfirm, useToast } from '@/components/ui';
+import { Chip, EmptyState, FieldLabel, Input, SelectField, SheetModal, Skeleton, Toggle, useConfirm, useToast } from '@/components/ui';
 import type { ForeshadowItem } from '@/lib/api';
 import { ApiError, FORESHADOW_STATUS_LABEL } from '@/lib/api';
 import { friendlyError, useAuth } from '@/lib/auth';
@@ -21,13 +21,22 @@ const PLAN_SOURCE_OPTIONS = [
   { value: 'blueprint', label: '基于蓝图', hint: '按全书蓝图的伏笔计划来规划' },
 ];
 
+/** 服务端真实状态值：pending/planted/partially_resolved/resolved/missed/abandoned */
 const FILTERS = [
   { key: '', label: '全部' },
   { key: 'pending', label: '计划中' },
   { key: 'planted', label: '已埋入' },
   { key: 'resolved', label: '已回收' },
-  { key: 'partial', label: '部分回收' },
+  { key: 'partially_resolved', label: '部分回收' },
   { key: 'abandoned', label: '已放弃' },
+];
+
+const STATUS_OPTIONS = [
+  { value: 'pending', label: '计划中' },
+  { value: 'planted', label: '已埋入' },
+  { value: 'partially_resolved', label: '部分回收' },
+  { value: 'resolved', label: '已回收' },
+  { value: 'abandoned', label: '已放弃' },
 ];
 
 function statusStyle(status: string): { fg: string; bg: string } {
@@ -36,13 +45,18 @@ function statusStyle(status: string): { fg: string; bg: string } {
       return { fg: C.blue, bg: C.blueSoft };
     case 'resolved':
       return { fg: C.green, bg: C.greenSoft };
-    case 'partial':
+    case 'partially_resolved':
       return { fg: C.purple, bg: C.purpleSoft };
     case 'abandoned':
       return { fg: C.text3, bg: C.card2 };
     default:
       return { fg: C.gold, bg: C.goldSoft };
   }
+}
+
+/** 逗号/顿号/换行分隔的角色名 → 数组（structure.related_characters 与网页端同口径） */
+function toNameArray(text: string): string[] {
+  return text.split(/[,，、\n]+/).map((s) => s.trim()).filter(Boolean);
 }
 
 /** 伏笔面板：筛选 + 新建/编辑 + 埋入/回收/放弃 + AI 规划 */
@@ -54,9 +68,14 @@ export function ForeshadowsPanel({ projectId }: { projectId: number }) {
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [type, setType] = useState('');
+  const [status, setStatus] = useState('pending');
   const [priority, setPriority] = useState('5');
   const [plantCh, setPlantCh] = useState('');
   const [resolveCh, setResolveCh] = useState('');
+  const [relatedChars, setRelatedChars] = useState('');
+  const [hintText, setHintText] = useState('');
+  const [notes, setNotes] = useState('');
+  const [longTerm, setLongTerm] = useState(false);
   const [saving, setSaving] = useState(false);
   const [toast, toastNode] = useToast();
   const [confirm, confirmNode] = useConfirm();
@@ -67,10 +86,10 @@ export function ForeshadowsPanel({ projectId }: { projectId: number }) {
   const [planSubmitting, setPlanSubmitting] = useState(false);
 
   const load = useCallback(
-    async (status = filter) => {
+    async (statusFilter = filter) => {
       if (!api) return;
       try {
-        const list = await api.getForeshadows(projectId, status || undefined);
+        const list = await api.getForeshadows(projectId, statusFilter || undefined);
         setItems(list ?? []);
       } catch (e) {
         if (e instanceof ApiError && e.status === 401) {
@@ -94,29 +113,54 @@ export function ForeshadowsPanel({ projectId }: { projectId: number }) {
     setTitle('');
     setContent('');
     setType('悬念');
+    setStatus('pending');
     setPriority('5');
     setPlantCh('');
     setResolveCh('');
+    setRelatedChars('');
+    setHintText('');
+    setNotes('');
+    setLongTerm(false);
   };
 
   const openEdit = (f: ForeshadowItem) => {
+    const s = (f.structure ?? {}) as Record<string, unknown>;
+    const strArr = (v: unknown): string => (Array.isArray(v) ? v.filter((x) => typeof x === 'string' && x).join('，') : '');
     setEditing(f);
     setTitle(f.title);
     setContent(f.content ?? '');
     setType(f.foreshadow_type || '');
+    setStatus(f.status || 'pending');
     setPriority(String(f.priority ?? 5));
     setPlantCh(f.plant_chapter_number ? String(f.plant_chapter_number) : '');
     setResolveCh(f.target_resolve_chapter_number ? String(f.target_resolve_chapter_number) : '');
+    setRelatedChars(strArr(s.related_characters));
+    setHintText(typeof s.hint_text === 'string' ? s.hint_text : '');
+    setNotes(typeof s.notes === 'string' ? s.notes : '');
+    setLongTerm(s.is_long_term === true);
   };
 
-  const body = () => ({
-    title: title.trim(),
-    content,
-    foreshadow_type: type,
-    priority: Math.max(1, Math.min(10, Number(priority) || 5)),
-    plant_chapter_number: plantCh ? Number(plantCh) : null,
-    target_resolve_chapter_number: resolveCh ? Number(resolveCh) : null,
-  });
+  const body = () => {
+    const structure = {
+      ...((editing && editing !== 'new' ? (editing.structure ?? {}) : {}) as Record<string, unknown>),
+      related_characters: toNameArray(relatedChars),
+      hint_text: hintText.trim(),
+      notes: notes.trim(),
+      is_long_term: longTerm,
+    };
+    return {
+      title: title.trim(),
+      content,
+      foreshadow_type: type,
+      // 服务端 PUT 全量覆盖：status/source_type 必须带上，否则编辑后状态退回计划中、来源变手动
+      status,
+      source_type: editing && editing !== 'new' ? editing.source_type : 'manual',
+      priority: Math.max(1, Math.min(10, Number(priority) || 5)),
+      plant_chapter_number: plantCh ? Number(plantCh) : null,
+      target_resolve_chapter_number: resolveCh ? Number(resolveCh) : null,
+      structure,
+    };
+  };
 
   const save = async () => {
     if (!api || !editing || saving) return;
@@ -145,7 +189,16 @@ export function ForeshadowsPanel({ projectId }: { projectId: number }) {
     try {
       await fn();
       toast(okMsg);
-      load();
+      const list = await api!.getForeshadows(projectId, filter || undefined);
+      setItems(list ?? []);
+      // 同步编辑弹窗里的对象与状态字段：否则「标记埋入→保存」会把旧状态写回计划中
+      if (editing && editing !== 'new') {
+        const fresh = (list ?? []).find((x) => x.id === editing.id);
+        if (fresh) {
+          setEditing(fresh);
+          setStatus(fresh.status || 'pending');
+        }
+      }
     } catch (e) {
       toast(friendlyError(e));
     }
@@ -289,6 +342,7 @@ export function ForeshadowsPanel({ projectId }: { projectId: number }) {
       ) : (
         items.map((f) => {
           const s = statusStyle(f.status);
+          const st = (f.structure ?? {}) as Record<string, unknown>;
           return (
             <Pressable
               key={f.id}
@@ -306,6 +360,7 @@ export function ForeshadowsPanel({ projectId }: { projectId: number }) {
                 <Text style={{ color: C.text, fontSize: 14, fontWeight: '700', flex: 1 }} numberOfLines={1}>
                   {f.title}
                 </Text>
+                {st.is_long_term === true ? <Chip label="长线" fg={C.purple} bg={C.purpleSoft} /> : null}
                 {f.foreshadow_type ? <Chip label={f.foreshadow_type} /> : null}
                 <Chip label={FORESHADOW_STATUS_LABEL[f.status] ?? f.status} fg={s.fg} bg={s.bg} bold />
               </View>
@@ -332,6 +387,7 @@ export function ForeshadowsPanel({ projectId }: { projectId: number }) {
         <FieldLabel>标题</FieldLabel>
         <Input value={title} onChangeText={setTitle} placeholder="伏笔标题" />
         <SelectField label="类型" value={type || '悬念'} options={TYPE_SELECT_OPTIONS} onChange={setType} />
+        {cur ? <SelectField label="状态" value={status || 'pending'} options={STATUS_OPTIONS} onChange={setStatus} /> : null}
         <View style={{ gap: 7 }}>
           <FieldLabel>内容（埋什么、怎么收）</FieldLabel>
           <Input value={content} onChangeText={setContent} placeholder="伏笔内容…" multiline height={140} />
@@ -349,6 +405,15 @@ export function ForeshadowsPanel({ projectId }: { projectId: number }) {
             <FieldLabel>优先级</FieldLabel>
             <Input value={priority} onChangeText={(v) => setPriority(v.replace(/[^0-9]/g, ''))} keyboardType="number-pad" />
           </View>
+        </View>
+        <FieldLabel>关联角色（逗号分隔）</FieldLabel>
+        <Input value={relatedChars} onChangeText={setRelatedChars} placeholder="如：温鹤延，满仓" />
+        <FieldLabel>暗示文本</FieldLabel>
+        <Input value={hintText} onChangeText={setHintText} placeholder="埋设时正文里出现的提示性文字" multiline height={70} />
+        <FieldLabel>备注</FieldLabel>
+        <Input value={notes} onChangeText={setNotes} placeholder="创作备注…" multiline height={70} />
+        <View style={{ borderTopWidth: 1, borderTopColor: C.borderSoft, paddingTop: 6 }}>
+          <Toggle label="长线伏笔" hint="贯穿全书的重磅伏笔，列表会加「长线」标记" value={longTerm} onChange={setLongTerm} />
         </View>
 
         <Pressable

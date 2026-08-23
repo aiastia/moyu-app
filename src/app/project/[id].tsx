@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { ChapterBadge, Chip, EmptyState, FieldLabel, Input, ProgressBar, ScreenHeader, SegmentedTabs, SheetModal, Skeleton, useConfirm, useToast } from '@/components/ui';
+import { ChapterBadge, Chip, EmptyState, FieldLabel, Input, ProgressBar, ScreenHeader, SegmentedTabs, SelectField, SheetModal, Skeleton, useConfirm, useToast } from '@/components/ui';
 import { ForeshadowsPanel } from '@/components/ForeshadowsPanel';
 import { CharactersPanel } from '@/components/CharactersPanel';
 import { WorldsPanel } from '@/components/WorldsPanel';
@@ -49,6 +49,26 @@ const TABS = [
   { key: 'about', label: '概况' },
 ] as const;
 
+/** 叙事视角/目标平台下拉：固定选项 + 当前值不在清单内时追加（兼容历史自定义值） */
+function withCurrent(options: { value: string; label: string }[], current?: string | null) {
+  if (current && !options.some((o) => o.value === current)) {
+    return [...options, { value: current, label: `${current}（当前）` }];
+  }
+  return options;
+}
+const POV_OPTIONS = [
+  { value: '第三人称', label: '第三人称' },
+  { value: '第一人称', label: '第一人称' },
+  { value: '全知视角', label: '全知视角' },
+];
+const PLATFORM_OPTIONS = [
+  { value: '通用', label: '通用' },
+  { value: '番茄', label: '番茄' },
+  { value: '起点', label: '起点' },
+  { value: '晋江', label: '晋江' },
+  { value: '微信读书', label: '微信读书' },
+];
+
 function InfoRow({ label, value }: { label: string; value?: string | null }) {
   if (!value) return null;
   return (
@@ -81,6 +101,10 @@ export default function ProjectScreen() {
   /** 大纲编辑表单（null=详情弹窗处于只读态） */
   const [outlineEdit, setOutlineEdit] = useState<{ title: string; summary: string; emotion: string; goal: string; keyPoints: string; scenes: OutlineSceneEdit[]; charactersText: string; orgsText: string } | null>(null);
   const [outlineSaving, setOutlineSaving] = useState(false);
+  /** 概况 Tab：项目信息编辑表单（null=未打开） */
+  const [aboutEdit, setAboutEdit] = useState<{ title: string; penName: string; genre: string; pov: string; platform: string; wordsWan: string; synopsis: string } | null>(null);
+  const [aboutSaving, setAboutSaving] = useState(false);
+  const [statusBusy, setStatusBusy] = useState(false);
 
   const guard = useCallback(
     async (e: unknown) => {
@@ -258,6 +282,71 @@ export default function ProjectScreen() {
       .finally(() => setOutlineSaving(false));
   };
 
+  /** 概况：保存项目元信息（网页端仪表盘「项目信息卡」同款字段） */
+  const saveAboutEdit = () => {
+    if (!api || !project || !aboutEdit || aboutSaving) return;
+    if (!aboutEdit.title.trim()) {
+      toast('请填写书名');
+      return;
+    }
+    setAboutSaving(true);
+    api
+      .updateProject(projectId, {
+        title: aboutEdit.title.trim(),
+        pen_name: aboutEdit.penName.trim(),
+        genre: aboutEdit.genre.trim(),
+        synopsis: aboutEdit.synopsis,
+        narrative_pov: aboutEdit.pov,
+        target_platform: aboutEdit.platform,
+        target_word_count: Math.max(0, Math.round((Number(aboutEdit.wordsWan) || 0) * 10000)),
+      })
+      .then(() => {
+        setProject((p) =>
+          p
+            ? {
+                ...p,
+                title: aboutEdit.title.trim(),
+                pen_name: aboutEdit.penName.trim(),
+                genre: aboutEdit.genre.trim(),
+                synopsis: aboutEdit.synopsis,
+                narrative_pov: aboutEdit.pov,
+                target_platform: aboutEdit.platform,
+                target_word_count: Math.max(0, Math.round((Number(aboutEdit.wordsWan) || 0) * 10000)),
+              }
+            : p,
+        );
+        setAboutEdit(null);
+        toast('项目信息已保存');
+      })
+      .catch((e) => toast(friendlyError(e)))
+      .finally(() => setAboutSaving(false));
+  };
+
+  /** 概况：归档/恢复（归档后从书架主列表移到「已归档」） */
+  const toggleArchive = () => {
+    if (!api || !project || statusBusy) return;
+    const archived = project.status === 'archived';
+    confirm({
+      title: archived ? '恢复作品' : '归档作品',
+      message: archived
+        ? `把「${project.title}」恢复到书架主列表？`
+        : `归档「${project.title}」？正文与设定都保留，书籍移入书架「已归档」分组。`,
+      confirmText: archived ? '恢复' : '归档',
+      destructive: !archived,
+      onConfirm: () => {
+        setStatusBusy(true);
+        api
+          .updateProject(projectId, { status: archived ? 'active' : 'archived' })
+          .then(() => {
+            setProject((p) => (p ? { ...p, status: archived ? 'active' : 'archived' } : p));
+            toast(archived ? '已恢复到书架' : '已归档，可在书架「已归档」分组查看');
+          })
+          .catch((e) => toast(friendlyError(e)))
+          .finally(() => setStatusBusy(false));
+      },
+    });
+  };
+
   /** key_points 兼容两种来源：服务端是 list[str]，网页端手填的可能是换行分隔字符串 */
   const keyPointList = useMemo(() => {
     const kp = outlineDetail?.key_points;
@@ -301,7 +390,10 @@ export default function ProjectScreen() {
               </Text>
             ) : null}
           </View>
-          <Text style={{ color: C.text3, fontSize: 11 }}>{c.word_count > 0 ? `${c.word_count}字` : '未写'}</Text>
+            {c.word_count > 0 && c.status === 'draft' ? <Chip label="草稿" fg={C.gold} bg={C.goldSoft} /> : null}
+            <Text style={{ color: C.text3, fontSize: 11 }}>
+              {c.word_count > 0 ? `${c.word_count}字${c.quality_score ? ` · ${c.quality_score}分` : ''}` : '未写'}
+            </Text>
           <Pressable
             onPress={() => submitChapterGenerate(c)}
             hitSlop={6}
@@ -351,6 +443,7 @@ export default function ProjectScreen() {
                     {project.genre ? <Chip label={project.genre} fg={C.gold} bg={C.goldSoft} bold /> : null}
                     <Chip label={STORY_KIND_LABEL[project.story_kind] ?? '作品'} fg={C.blue} bg={C.blueSoft} />
                     {project.is_fanfic ? <Chip label="同人" fg={C.purple} bg={C.purpleSoft} /> : null}
+                    {project.status === 'archived' ? <Chip label="已归档" fg={C.seal} bg={C.sealSoft} /> : null}
                   </View>
                   {project.synopsis ? (
                     <Text style={{ color: C.text2, fontSize: 12, lineHeight: 18 }} numberOfLines={4}>
@@ -497,6 +590,58 @@ export default function ProjectScreen() {
                     load(true);
                   }}
                 />
+                <View style={{ flexDirection: 'row', gap: 10 }}>
+                  <Pressable
+                    onPress={() =>
+                      setAboutEdit({
+                        title: project.title ?? '',
+                        penName: project.pen_name ?? '',
+                        genre: project.genre ?? '',
+                        pov: project.narrative_pov || '第三人称',
+                        platform: project.target_platform || '通用',
+                        wordsWan: project.target_word_count ? String(Math.round(project.target_word_count / 10000)) : '',
+                        synopsis: typeof project.synopsis === 'string' ? project.synopsis : '',
+                      })
+                    }
+                    style={({ pressed }) => ({
+                      flex: 1,
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 6,
+                      height: 42,
+                      borderRadius: R.m,
+                      backgroundColor: pressed ? '#3A2F16' : C.goldSoft,
+                      borderWidth: 1,
+                      borderColor: 'rgba(229,181,88,0.4)',
+                    })}
+                  >
+                    <Ionicons name="create-outline" size={15} color={C.gold} />
+                    <Text style={{ color: C.gold, fontSize: 13, fontWeight: '700' }}>编辑信息</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={toggleArchive}
+                    disabled={statusBusy}
+                    style={({ pressed }) => ({
+                      flex: 1,
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 6,
+                      height: 42,
+                      borderRadius: R.m,
+                      backgroundColor: project.status === 'archived' ? C.greenSoft : pressed ? '#31202A' : C.sealSoft,
+                      borderWidth: 1,
+                      borderColor: project.status === 'archived' ? 'rgba(95,191,143,0.4)' : 'rgba(214,90,69,0.4)',
+                      opacity: statusBusy ? 0.6 : 1,
+                    })}
+                  >
+                    <Ionicons name={project.status === 'archived' ? 'refresh-outline' : 'archive-outline'} size={15} color={project.status === 'archived' ? C.green : C.seal} />
+                    <Text style={{ color: project.status === 'archived' ? C.green : C.seal, fontSize: 13, fontWeight: '700' }}>
+                      {project.status === 'archived' ? '恢复作品' : '归档作品'}
+                    </Text>
+                  </Pressable>
+                </View>
                 <View style={{ backgroundColor: C.card, borderRadius: R.l, borderWidth: 1, borderColor: C.borderSoft, padding: SP.l, gap: 13 }}>
                 {project.synopsis ? <Text style={{ color: C.text2, fontSize: 13, lineHeight: 22 }}>{project.synopsis}</Text> : null}
                 <View style={{ height: 1, backgroundColor: C.borderSoft }} />
@@ -703,6 +848,58 @@ export default function ProjectScreen() {
             </Pressable>
             </View>
           )
+        ) : null}
+      </SheetModal>
+
+      {/* 编辑项目信息：网页端仪表盘「项目信息卡」同款字段 */}
+      <SheetModal visible={aboutEdit !== null} onClose={() => setAboutEdit(null)} title="编辑项目信息">
+        {aboutEdit ? (
+          <>
+            <View style={{ gap: 7 }}>
+              <FieldLabel>书名 *</FieldLabel>
+              <Input value={aboutEdit.title} onChangeText={(v) => setAboutEdit((f) => (f ? { ...f, title: v } : f))} placeholder="书名" />
+            </View>
+            <View style={{ flexDirection: 'row', gap: 10 }}>
+              <View style={{ flex: 1, gap: 7 }}>
+                <FieldLabel>笔名</FieldLabel>
+                <Input value={aboutEdit.penName} onChangeText={(v) => setAboutEdit((f) => (f ? { ...f, penName: v } : f))} placeholder="用于封面与导出" />
+              </View>
+              <View style={{ flex: 1, gap: 7 }}>
+                <FieldLabel>题材</FieldLabel>
+                <Input value={aboutEdit.genre} onChangeText={(v) => setAboutEdit((f) => (f ? { ...f, genre: v } : f))} placeholder="如：仙侠" />
+              </View>
+            </View>
+            <View style={{ flexDirection: 'row', gap: 10 }}>
+              <View style={{ flex: 1.2 }}>
+                <SelectField label="叙事视角" value={aboutEdit.pov} options={withCurrent(POV_OPTIONS, project?.narrative_pov)} onChange={(v) => setAboutEdit((f) => (f ? { ...f, pov: v } : f))} />
+              </View>
+              <View style={{ flex: 1.4 }}>
+                <SelectField label="目标平台" value={aboutEdit.platform} options={withCurrent(PLATFORM_OPTIONS, project?.target_platform)} onChange={(v) => setAboutEdit((f) => (f ? { ...f, platform: v } : f))} />
+              </View>
+            </View>
+            <View style={{ gap: 7 }}>
+              <FieldLabel>目标字数（万）</FieldLabel>
+              <Input
+                value={aboutEdit.wordsWan}
+                onChangeText={(v) => setAboutEdit((f) => (f ? { ...f, wordsWan: v.replace(/[^0-9]/g, '') } : f))}
+                placeholder="如 50"
+                keyboardType="number-pad"
+              />
+            </View>
+            <View style={{ gap: 7 }}>
+              <FieldLabel>简介</FieldLabel>
+              <Input value={aboutEdit.synopsis} onChangeText={(v) => setAboutEdit((f) => (f ? { ...f, synopsis: v } : f))} placeholder="一句话描述故事" multiline height={110} />
+            </View>
+            <Text style={{ color: C.text3, fontSize: 11, lineHeight: 16 }}>目标平台影响生成调性（书名风格、节奏、爽点设计）</Text>
+            <Pressable
+              onPress={saveAboutEdit}
+              disabled={aboutSaving}
+              style={{ height: 46, borderRadius: R.m, backgroundColor: C.gold, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 8, marginTop: 4 }}
+            >
+              {aboutSaving ? <ActivityIndicator size="small" color="#1A1206" /> : <Ionicons name="checkmark" size={17} color="#1A1206" />}
+              <Text style={{ color: '#1A1206', fontSize: 15, fontWeight: '800' }}>{aboutSaving ? '保存中…' : '保存'}</Text>
+            </Pressable>
+          </>
         ) : null}
       </SheetModal>
 

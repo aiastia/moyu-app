@@ -3,7 +3,7 @@ import { router } from 'expo-router';
 import { useState } from 'react';
 import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 
-import { FieldLabel, Input, SheetModal, useConfirm, useToast } from '@/components/ui';
+import { FieldLabel, Input, SheetModal, Toggle, useConfirm, useToast } from '@/components/ui';
 import { friendlyError, useAuth } from '@/lib/auth';
 import { C, R } from '@/lib/theme';
 
@@ -38,20 +38,6 @@ function PickChips({ options, value, onChange, suffix = '' }: { options: number[
         );
       })}
     </View>
-  );
-}
-
-function Toggle({ label, hint, value, onChange }: { label: string; hint: string; value: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <Pressable onPress={() => onChange(!value)} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 4 }}>
-      <View style={{ flex: 1, gap: 1 }}>
-        <Text style={{ color: C.text, fontSize: 14, fontWeight: '600' }}>{label}</Text>
-        <Text style={{ color: C.text3, fontSize: 11 }}>{hint}</Text>
-      </View>
-      <View style={{ width: 46, height: 27, borderRadius: 14, backgroundColor: value ? C.gold : '#2A3042', padding: 3 }}>
-        <View style={{ width: 21, height: 21, borderRadius: 11, backgroundColor: '#fff', alignSelf: value ? 'flex-end' : 'flex-start' }} />
-      </View>
-    </Pressable>
   );
 }
 
