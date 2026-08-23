@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import React, { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { Animated, Pressable, Text, View, type ViewStyle } from 'react-native';
+import { Animated, Modal, Pressable, ScrollView, Text, TextInput, View, type ViewStyle } from 'react-native';
 
 import { C, R } from '@/lib/theme';
 
@@ -74,10 +74,10 @@ export function Skeleton({ count = 3, height = 116, style }: { count?: number; h
   );
 }
 
-/** 分段标签 */
+/** 分段标签（可横向滚动，适配多分栏） */
 export function SegmentedTabs({ tabs, active, onChange }: { tabs: { key: string; label: string }[]; active: string; onChange: (key: string) => void }) {
   return (
-    <View style={{ flexDirection: 'row', backgroundColor: C.card, borderRadius: R.m, padding: 3, borderWidth: 1, borderColor: C.borderSoft, gap: 2 }}>
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingHorizontal: 1, paddingVertical: 1 }}>
       {tabs.map((t) => {
         const on = t.key === active;
         return (
@@ -85,18 +85,21 @@ export function SegmentedTabs({ tabs, active, onChange }: { tabs: { key: string;
             key={t.key}
             onPress={() => onChange(t.key)}
             style={{
-              flex: 1,
               alignItems: 'center',
+              justifyContent: 'center',
               paddingVertical: 8,
-              borderRadius: R.m - 3,
-              backgroundColor: on ? C.card2 : 'transparent',
+              paddingHorizontal: 16,
+              borderRadius: 20,
+              backgroundColor: on ? C.goldSoft : C.card,
+              borderWidth: 1,
+              borderColor: on ? 'rgba(229,181,88,0.4)' : C.borderSoft,
             }}
           >
             <Text style={{ color: on ? C.gold : C.text2, fontSize: 13, fontWeight: on ? '700' : '500' }}>{t.label}</Text>
           </Pressable>
         );
       })}
-    </View>
+    </ScrollView>
   );
 }
 
@@ -157,5 +160,63 @@ export function ChapterBadge({ number, written }: { number: number; written: boo
         {number}
       </Text>
     </View>
+  );
+}
+
+/** 表单字段标签 */
+export function FieldLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <Text style={{ color: C.text2, fontSize: 12, fontWeight: '600', marginLeft: 2 }}>{children}</Text>
+  );
+}
+
+/** 统一样式的文本输入框 */
+export function Input({
+  height,
+  ...rest
+}: React.ComponentProps<typeof TextInput> & { height?: number }) {
+  return (
+    <TextInput
+      placeholderTextColor="#5A6170"
+      keyboardAppearance="dark"
+      {...rest}
+      style={[
+        {
+          backgroundColor: '#0F121B',
+          borderWidth: 1,
+          borderColor: '#242A3B',
+          borderRadius: R.m,
+          paddingHorizontal: 13,
+          paddingVertical: 0,
+          height: height ?? 44,
+          color: C.text,
+          fontSize: 14.5,
+        },
+        rest.multiline ? { paddingTop: 10, paddingBottom: 10, height: height ?? 100, textAlignVertical: 'top', lineHeight: 21 } : null,
+        rest.style as object,
+      ]}
+    />
+  );
+}
+
+/** 底部弹层表单壳 */
+export function SheetModal({ visible, onClose, title, children }: { visible: boolean; onClose: () => void; title: string; children: React.ReactNode }) {
+  return (
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+      <View style={{ flex: 1, justifyContent: 'flex-end' }}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)' }} onPress={onClose} />
+        <View style={{ backgroundColor: '#141826', borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 20, paddingTop: 18, paddingBottom: 36, maxHeight: '88%', borderWidth: 1, borderColor: '#262C3F' }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 14 }}>
+            <Text style={{ color: C.text, fontSize: 16, fontWeight: '800', flex: 1 }}>{title}</Text>
+            <Pressable onPress={onClose} hitSlop={8}>
+              <Ionicons name="close" size={21} color={C.text2} />
+            </Pressable>
+          </View>
+          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 12, paddingBottom: 6 }}>
+            {children}
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
   );
 }

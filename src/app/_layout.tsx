@@ -41,6 +41,7 @@ export default function RootLayout() {
       >
         <Stack.Screen name="(tabs)" options={{ animation: 'fade' }} />
         <Stack.Screen name="login" options={{ animation: 'fade' }} />
+        <Stack.Screen name="create-book" />
         <Stack.Screen name="project/[id]" />
         <Stack.Screen name="reader" options={{ animation: 'slide_from_bottom', animationDuration: 260 }} />
         <Stack.Screen name="editor" />

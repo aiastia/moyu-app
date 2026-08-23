@@ -5,18 +5,22 @@ import { Alert, Pressable, RefreshControl, ScrollView, Text, View } from 'react-
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ChapterBadge, Chip, EmptyState, ProgressBar, ScreenHeader, SegmentedTabs, Skeleton, useToast } from '@/components/ui';
+import { ForeshadowsPanel } from '@/components/ForeshadowsPanel';
+import { WorldsPanel } from '@/components/WorldsPanel';
 import type { ChapterRow, CharacterItem, OutlineItem, ProjectDetail } from '@/lib/api';
 import { ApiError } from '@/lib/api';
 import { friendlyError, loadLastRead, useAuth } from '@/lib/auth';
 import { fmtPercent, fmtRelative, fmtWords, STORY_KIND_LABEL } from '@/lib/format';
 import { C, R, SP } from '@/lib/theme';
 
-type TabKey = 'chapters' | 'outlines' | 'characters' | 'about';
+type TabKey = 'chapters' | 'outlines' | 'characters' | 'world' | 'foreshadow' | 'about';
 
 const TABS = [
   { key: 'chapters', label: '章节' },
   { key: 'outlines', label: '大纲' },
   { key: 'characters', label: '角色' },
+  { key: 'world', label: '世界' },
+  { key: 'foreshadow', label: '伏笔' },
   { key: 'about', label: '概况' },
 ] as const;
 
@@ -379,6 +383,10 @@ export default function ProjectScreen() {
                 </View>
               )
             ) : null}
+
+            {tab === 'world' ? <WorldsPanel projectId={projectId} /> : null}
+
+            {tab === 'foreshadow' ? <ForeshadowsPanel projectId={projectId} /> : null}
 
             {tab === 'about' && project ? (
               <View style={{ backgroundColor: C.card, borderRadius: R.l, borderWidth: 1, borderColor: C.borderSoft, padding: SP.l, gap: 13 }}>

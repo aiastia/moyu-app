@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import Constants from 'expo-constants';
 import { router } from 'expo-router';
 import { Linking } from 'react-native';
 import { useState } from 'react';
@@ -102,7 +103,7 @@ export default function SettingsScreen() {
 
         <Card>
           <Text style={{ color: C.text2, fontSize: 12, fontWeight: '700' }}>关于</Text>
-          <Row icon="information-circle-outline" label="版本" value="墨鱼写作 v1.0.0" />
+          <Row icon="information-circle-outline" label="版本" value={`墨鱼写作 v${Constants.expoConfig?.version ?? '1.0'}`} />
           <Pressable onPress={() => Linking.openURL('https://github.com/aiastia/moyu-app')} style={{ flexDirection: 'row', alignItems: 'center', gap: 11 }}>
             <View style={{ width: 34, height: 34, borderRadius: 11, backgroundColor: C.card2, alignItems: 'center', justifyContent: 'center' }}>
               <Ionicons name="logo-github" size={16} color={C.gold} />

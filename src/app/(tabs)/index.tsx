@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { Link, router } from 'expo-router';
+import { Link, router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, RefreshControl, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -42,6 +42,13 @@ export default function BookshelfScreen() {
     load();
   }, [load]);
 
+  // 从建书页/项目页返回时静默刷新
+  useFocusEffect(
+    useCallback(() => {
+      load(true);
+    }, [load]),
+  );
+
   const filtered = useMemo(() => {
     if (!books) return null;
     const k = keyword.trim();
@@ -74,6 +81,21 @@ export default function BookshelfScreen() {
               {user?.nickname || user?.username || '已登录'} · {host}
             </Text>
           </View>
+          <Pressable
+            onPress={() => router.push('/create-book')}
+            style={({ pressed }) => ({
+              width: 40,
+              height: 40,
+              borderRadius: 14,
+              backgroundColor: pressed ? '#3A2F16' : C.goldSoft,
+              borderWidth: 1,
+              borderColor: 'rgba(229,181,88,0.4)',
+              alignItems: 'center',
+              justifyContent: 'center',
+            })}
+          >
+            <Ionicons name="add" size={21} color={C.gold} />
+          </Pressable>
           <Link href="/settings" asChild>
             <Pressable
               style={{ width: 40, height: 40, borderRadius: 14, backgroundColor: C.card, borderWidth: 1, borderColor: C.borderSoft, alignItems: 'center', justifyContent: 'center' }}

@@ -111,6 +111,56 @@ export interface LoginUser {
   is_admin?: boolean;
 }
 
+export interface WorldItem {
+  id: number;
+  name: string;
+  category: string;
+  content: string;
+}
+
+export interface ForeshadowItem {
+  id: number;
+  title: string;
+  content: string;
+  foreshadow_type: string;
+  status: string;
+  source_type: string;
+  plant_chapter_number?: number | null;
+  actual_plant_chapter?: number | null;
+  target_resolve_chapter_number?: number | null;
+  actual_resolve_chapter?: number | null;
+  priority: number;
+  structure?: Record<string, unknown>;
+}
+
+export interface CreateProjectBody {
+  title: string;
+  genre?: string;
+  synopsis?: string;
+  target_word_count?: number;
+  narrative_pov?: string;
+  story_kind?: string;
+  pen_name?: string;
+  target_platform?: string;
+}
+
+export interface ForeshadowBody {
+  title: string;
+  content?: string;
+  foreshadow_type?: string;
+  priority?: number;
+  plant_chapter_number?: number | null;
+  target_resolve_chapter_number?: number | null;
+}
+
+export const FORESHADOW_STATUS_LABEL: Record<string, string> = {
+  pending: '计划中',
+  planted: '已埋入',
+  resolved: '已回收',
+  partial: '部分回收',
+  abandoned: '已放弃',
+};
+
 export class ApiError extends Error {
   status: number;
   constructor(status: number, message: string) {
@@ -253,6 +303,94 @@ export class Api {
     return this.req<{ task_id: number }>(`/api/projects/${projectId}/outlines/generate-async`, {
       method: 'POST',
       body: JSON.stringify({ chapter_count: chapterCount }),
+    });
+  }
+
+  /** 创建新书 */
+  createProject(body: CreateProjectBody) {
+    return this.req<{ id: number; title: string }>('/api/projects', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
+  // ===== 世界观 =====
+  getWorlds(projectId: number) {
+    return this.req<WorldItem[]>(`/api/projects/${projectId}/worlds`);
+  }
+
+  createWorld(projectId: number, body: { name: string; category?: string; content?: string }) {
+    return this.req<{ id: number }>(`/api/projects/${projectId}/worlds`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
+  updateWorld(projectId: number, worldId: number, body: { name: string; category?: string; content?: string }) {
+    return this.req<{ ok: boolean }>(`/api/projects/${projectId}/worlds/${worldId}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    });
+  }
+
+  deleteWorld(projectId: number, worldId: number) {
+    return this.req<{ ok: boolean }>(`/api/projects/${projectId}/worlds/${worldId}`, { method: 'DELETE' });
+  }
+
+  getWorldCategories(projectId: number) {
+    return this.req<{ categories: string[] }>(`/api/projects/${projectId}/worlds/categories`);
+  }
+
+  // ===== 伏笔 =====
+  getForeshadows(projectId: number, status?: string) {
+    const q = status ? `?status=${encodeURIComponent(status)}` : '';
+    return this.req<ForeshadowItem[]>(`/api/projects/${projectId}/foreshadows${q}`);
+  }
+
+  createForeshadow(projectId: number, body: ForeshadowBody) {
+    return this.req<{ id: number }>(`/api/projects/${projectId}/foreshadows`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
+  updateForeshadow(projectId: number, foreshadowId: number, body: ForeshadowBody) {
+    return this.req<{ ok: boolean }>(`/api/projects/${projectId}/foreshadows/${foreshadowId}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    });
+  }
+
+  deleteForeshadow(projectId: number, foreshadowId: number) {
+    return this.req<{ ok: boolean }>(`/api/projects/${projectId}/foreshadows/${foreshadowId}`, { method: 'DELETE' });
+  }
+
+  markForeshadowPlanted(projectId: number, foreshadowId: number, chapterNumber: number, hintText = '') {
+    return this.req<{ ok: boolean }>(`/api/projects/${projectId}/foreshadows/${foreshadowId}/plant`, {
+      method: 'POST',
+      body: JSON.stringify({ chapter_number: chapterNumber, hint_text: hintText }),
+    });
+  }
+
+  markForeshadowResolved(projectId: number, foreshadowId: number, chapterNumber: number, resolutionText = '', isPartial = false) {
+    return this.req<{ ok: boolean }>(`/api/projects/${projectId}/foreshadows/${foreshadowId}/resolve`, {
+      method: 'POST',
+      body: JSON.stringify({ chapter_number: chapterNumber, resolution_text: resolutionText, is_partial: isPartial }),
+    });
+  }
+
+  abandonForeshadow(projectId: number, foreshadowId: number, reason = '') {
+    return this.req<{ ok: boolean }>(`/api/projects/${projectId}/foreshadows/${foreshadowId}/abandon`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    });
+  }
+
+  /** AI 自动规划伏笔（异步任务）。source: outline=基于大纲 / blueprint=基于蓝图 */
+  planForeshadowsAsync(projectId: number, source: 'outline' | 'blueprint') {
+    return this.req<{ task_id: number }>(`/api/projects/${projectId}/foreshadows/plan/async`, {
+      method: 'POST',
+      body: JSON.stringify({ source }),
     });
   }
 
