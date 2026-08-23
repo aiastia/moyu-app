@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, Text, View } from 'react-native';
 
 import { Chip, EmptyState, FieldLabel, Input, SheetModal, Skeleton, useToast } from '@/components/ui';
+import { PortraitSheet } from '@/components/PortraitSheet';
 import type { CharacterBody, CharacterItem } from '@/lib/api';
 import { ApiError } from '@/lib/api';
 import { friendlyError, useAuth } from '@/lib/auth';
@@ -27,6 +28,7 @@ export function CharactersPanel({ projectId }: { projectId: number }) {
   const [form, setForm] = useState<CharacterBody>({ name: '', role: '配角', gender: '', age: '', identity: '', appearance: '', personality: '', background: '', ability: '', story_goal: '', motivation: '', weakness: '' });
   const [saving, setSaving] = useState(false);
   const [toast, toastNode] = useToast();
+  const [portraitChar, setPortraitChar] = useState<CharacterItem | null>(null);
 
   const set = (patch: Partial<CharacterBody>) => setForm((f) => ({ ...f, ...patch }));
 
@@ -159,6 +161,22 @@ export function CharactersPanel({ projectId }: { projectId: number }) {
                 {c.gender ? <Chip label={c.gender} /> : null}
                 {c.status && c.status !== 'alive' ? <Chip label={c.status} fg={C.text3} /> : null}
                 <View style={{ flex: 1 }} />
+                <Pressable
+                  onPress={() => setPortraitChar(c)}
+                  hitSlop={6}
+                  style={{
+                    width: 30,
+                    height: 30,
+                    borderRadius: 10,
+                    backgroundColor: c.reference_image ? C.goldSoft : C.card2,
+                    borderWidth: 1,
+                    borderColor: c.reference_image ? 'rgba(229,181,88,0.35)' : C.borderSoft,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <Ionicons name="image-outline" size={15} color={c.reference_image ? C.gold : C.text3} />
+                </Pressable>
                 <Ionicons name="chevron-forward" size={14} color={C.text3} />
               </View>
               {c.identity ? (
@@ -238,6 +256,14 @@ export function CharactersPanel({ projectId }: { projectId: number }) {
           </Pressable>
         </View>
       </SheetModal>
+
+      <PortraitSheet
+        projectId={projectId}
+        character={portraitChar}
+        visible={portraitChar !== null}
+        onClose={() => setPortraitChar(null)}
+        onUpdated={load}
+      />
     </View>
   );
 }

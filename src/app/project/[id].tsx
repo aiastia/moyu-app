@@ -8,6 +8,9 @@ import { ChapterBadge, Chip, EmptyState, ProgressBar, ScreenHeader, SegmentedTab
 import { ForeshadowsPanel } from '@/components/ForeshadowsPanel';
 import { CharactersPanel } from '@/components/CharactersPanel';
 import { WorldsPanel } from '@/components/WorldsPanel';
+import { AutoWriteSheet } from '@/components/AutoWriteSheet';
+import { CoverSheet } from '@/components/CoverSheet';
+import { CoverArt } from '@/components/CoverArt';
 import type { ChapterRow, OutlineItem, ProjectDetail } from '@/lib/api';
 import { ApiError } from '@/lib/api';
 import { friendlyError, loadLastRead, useAuth } from '@/lib/auth';
@@ -49,6 +52,7 @@ export default function ProjectScreen() {
   const [error, setError] = useState('');
   const [lastReadId, setLastReadId] = useState<number | null>(null);
   const [toast, toastNode] = useToast();
+  const [coverVersion, setCoverVersion] = useState(0);
 
   const guard = useCallback(
     async (e: unknown) => {
@@ -188,16 +192,21 @@ export default function ProjectScreen() {
           <>
             {/* 概要卡 */}
             <View style={{ backgroundColor: C.card, borderRadius: R.l, borderWidth: 1, borderColor: C.borderSoft, padding: SP.l, gap: 12 }}>
-              <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
-                {project.genre ? <Chip label={project.genre} fg={C.gold} bg={C.goldSoft} bold /> : null}
-                <Chip label={STORY_KIND_LABEL[project.story_kind] ?? '作品'} fg={C.blue} bg={C.blueSoft} />
-                {project.is_fanfic ? <Chip label="同人" fg={C.purple} bg={C.purpleSoft} /> : null}
+              <View style={{ flexDirection: 'row', gap: 14 }}>
+                <CoverArt projectId={projectId} title={project.title} width={66} height={92} refreshKey={coverVersion} />
+                <View style={{ flex: 1, gap: 8 }}>
+                  <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap' }}>
+                    {project.genre ? <Chip label={project.genre} fg={C.gold} bg={C.goldSoft} bold /> : null}
+                    <Chip label={STORY_KIND_LABEL[project.story_kind] ?? '作品'} fg={C.blue} bg={C.blueSoft} />
+                    {project.is_fanfic ? <Chip label="同人" fg={C.purple} bg={C.purpleSoft} /> : null}
+                  </View>
+                  {project.synopsis ? (
+                    <Text style={{ color: C.text2, fontSize: 12, lineHeight: 18 }} numberOfLines={4}>
+                      {project.synopsis}
+                    </Text>
+                  ) : null}
+                </View>
               </View>
-              {project.synopsis ? (
-                <Text style={{ color: C.text2, fontSize: 12.5, lineHeight: 20 }} numberOfLines={3}>
-                  {project.synopsis}
-                </Text>
-              ) : null}
               <View style={{ gap: 7 }}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                   <Text style={{ color: C.text, fontSize: 12.5, fontWeight: '700' }}>
@@ -241,12 +250,14 @@ export default function ProjectScreen() {
             <SegmentedTabs tabs={TABS.map((t) => ({ key: t.key, label: t.label }))} active={tab} onChange={(k) => setTab(k as TabKey)} />
 
             {tab === 'chapters' ? (
-              chapters === null ? (
-                <Skeleton count={6} height={64} />
-              ) : chapters.length === 0 ? (
-                <EmptyState icon="list-outline" title="还没有章节" sub="章节和大纲会在网页端生成" />
-              ) : (
-                <View style={{ gap: 8 }}>
+              <>
+                <AutoWriteSheet projectId={projectId} />
+                {chapters === null ? (
+                  <Skeleton count={6} height={64} />
+                ) : chapters.length === 0 ? (
+                  <EmptyState icon="list-outline" title="还没有章节" sub="点上方「一键连写」自动生成大纲和正文，或先去大纲分栏补大纲" />
+                ) : (
+                  <View style={{ gap: 8 }}>
                   {chapters.map((c) => (
                     <Pressable
                       key={c.id}
@@ -294,8 +305,9 @@ export default function ProjectScreen() {
                       <Ionicons name="chevron-forward" size={14} color={C.text3} />
                     </Pressable>
                   ))}
-                </View>
-              )
+                  </View>
+                )}
+              </>
             ) : null}
 
             {tab === 'outlines' ? (
@@ -360,7 +372,16 @@ export default function ProjectScreen() {
             {tab === 'foreshadow' ? <ForeshadowsPanel projectId={projectId} /> : null}
 
             {tab === 'about' && project ? (
-              <View style={{ backgroundColor: C.card, borderRadius: R.l, borderWidth: 1, borderColor: C.borderSoft, padding: SP.l, gap: 13 }}>
+              <>
+                <CoverSheet
+                  projectId={projectId}
+                  initialPrompt={project.cover_prompt}
+                  onCoverChanged={() => {
+                    setCoverVersion((v) => v + 1);
+                    load(true);
+                  }}
+                />
+                <View style={{ backgroundColor: C.card, borderRadius: R.l, borderWidth: 1, borderColor: C.borderSoft, padding: SP.l, gap: 13 }}>
                 {project.synopsis ? <Text style={{ color: C.text2, fontSize: 13, lineHeight: 22 }}>{project.synopsis}</Text> : null}
                 <View style={{ height: 1, backgroundColor: C.borderSoft }} />
                 <InfoRow label="题材" value={project.genre} />
@@ -371,7 +392,8 @@ export default function ProjectScreen() {
                 <InfoRow label="目标字数" value={project.target_word_count ? fmtWords(project.target_word_count) : undefined} />
                 <InfoRow label="创建时间" value={project.created_at?.slice(0, 10)} />
                 <InfoRow label="最近更新" value={project.updated_at ? fmtRelative(project.updated_at) : undefined} />
-              </View>
+                </View>
+              </>
             ) : null}
           </>
         ) : null}

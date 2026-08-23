@@ -31,6 +31,7 @@ export interface ProjectDetail {
   pen_name?: string | null;
   target_platform?: string | null;
   is_fanfic?: boolean;
+  cover_prompt?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
 }
@@ -94,6 +95,8 @@ export interface CharacterItem {
   motivation?: string | null;
   weakness?: string | null;
   status?: string | null;
+  reference_image?: string | null;
+  reference_prompt?: string | null;
 }
 
 export interface TaskItem {
@@ -447,6 +450,62 @@ export class Api {
       method: 'POST',
       body: JSON.stringify({ source }),
     });
+  }
+
+  /** 单个任务详情（轮询用） */
+  getTask(taskId: number) {
+    return this.req<TaskItem>(`/api/tasks/${taskId}`);
+  }
+
+  /** 一键连写：循环「大纲→正文」直到写满 total_chapters */
+  startAutoWrite(
+    projectId: number,
+    body: { total_chapters: number; batch_size?: number; enable_analysis?: boolean; enable_polish?: boolean; story_direction?: string },
+  ) {
+    return this.req<{ task_id: number }>(`/api/projects/${projectId}/auto-write/start`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
+  // ===== 封面 =====
+  /** AI 生成封面提示词（异步任务，结果写进 project.cover_prompt） */
+  coverPromptAsync(projectId: number) {
+    return this.req<{ task_id: number }>(`/api/projects/${projectId}/cover/generate-prompt`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+  }
+
+  /** 用提示词生成封面图片（异步任务，结果通过 cover/image 查看） */
+  coverImageAsync(projectId: number, prompt: string, size = '1024x1536') {
+    return this.req<{ task_id: number }>(`/api/projects/${projectId}/cover/generate-image`, {
+      method: 'POST',
+      body: JSON.stringify({ prompt, size }),
+    });
+  }
+
+  // ===== 角色立绘 =====
+  portraitPromptAsync(projectId: number, characterId: number, body: { style: string; view: string; extra_requirements?: string }) {
+    return this.req<{ task_id: number }>(`/api/projects/${projectId}/characters/${characterId}/portrait/generate-prompt`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
+  portraitImageAsync(projectId: number, characterId: number, prompt: string, size = '1024x1536') {
+    return this.req<{ task_id: number }>(`/api/projects/${projectId}/characters/${characterId}/portrait/generate-image`, {
+      method: 'POST',
+      body: JSON.stringify({ prompt, size }),
+    });
+  }
+
+  deletePortraitImage(projectId: number, characterId: number) {
+    return this.req<{ ok: boolean }>(`/api/projects/${projectId}/characters/${characterId}/portrait/image`, { method: 'DELETE' });
+  }
+
+  portraitUrl(characterId: number) {
+    return `${this.baseUrl}/api/portraits/${characterId}/image`;
   }
 
   coverUrl(projectId: number) {
