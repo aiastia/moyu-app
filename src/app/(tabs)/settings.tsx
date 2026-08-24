@@ -104,6 +104,23 @@ export default function SettingsScreen() {
         </Card>
 
         <Card>
+          <Text style={{ color: C.text2, fontSize: 12, fontWeight: '700' }}>创作</Text>
+          <Pressable onPress={() => router.push('/styles')} style={{ flexDirection: 'row', alignItems: 'center', gap: 11 }}>
+            <View style={{ width: 34, height: 34, borderRadius: 11, backgroundColor: C.card2, alignItems: 'center', justifyContent: 'center' }}>
+              <Ionicons name="brush-outline" size={16} color={C.gold} />
+            </View>
+            <View style={{ flex: 1, gap: 1 }}>
+              <Text style={{ color: C.text3, fontSize: 11 }}>写作风格</Text>
+              <Text style={{ color: C.text, fontSize: 14, fontWeight: '600' }} numberOfLines={1}>
+                管理风格库与默认风格
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={15} color={C.text3} />
+          </Pressable>
+          <Row icon="text-outline" label="阅读排版" value="字号/行距/段距在阅读页右上角「Aa」中调整" />
+        </Card>
+
+        <Card>
           <Text style={{ color: C.text2, fontSize: 12, fontWeight: '700' }}>关于</Text>
           <Row icon="information-circle-outline" label="版本" value={`墨鱼写作 v${Constants.expoConfig?.version ?? '1.0'}`} />
           <Pressable onPress={() => Linking.openURL('https://github.com/aiastia/moyu-app')} style={{ flexDirection: 'row', alignItems: 'center', gap: 11 }}>

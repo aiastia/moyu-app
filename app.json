@@ -2,7 +2,7 @@
   "expo": {
     "name": "墨鱼写作",
     "slug": "moyu-app",
-    "version": "1.8.0",
+    "version": "1.9.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "moyuapp",
@@ -10,7 +10,7 @@
     "backgroundColor": "#0B0D13",
     "android": {
       "package": "com.moyu.writer",
-      "versionCode": 15,
+      "versionCode": 16,
       "adaptiveIcon": {
         "backgroundColor": "#0C0E16",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -26,6 +26,7 @@
     },
     "plugins": [
       "expo-router",
+      "./plugins/withCleartext.js",
       [
         "expo-splash-screen",
         {

@@ -101,11 +101,12 @@ export function useConfirm(): [(opts: ConfirmOptions) => void, ReactNode] {
 }
 
 /** 小标签。maxWidth 用于长文本 chip（如大纲情绪是一长串"xx→xx→xx"），不限制会把同行
- *  的标题挤没（大纲列表行"只见情绪不见标题"的根因） */
-export function Chip({ label, fg = C.text2, bg = C.card2, bold = false, maxWidth }: { label: string; fg?: string; bg?: string; bold?: boolean; maxWidth?: DimensionValue }) {
+ *  的标题挤没（大纲列表行"只见情绪不见标题"的根因）。
+ *  multiline：文字完整换行显示不截断——详情弹窗里字段要看全量时用（列表行仍用单行截断）。 */
+export function Chip({ label, fg = C.text2, bg = C.card2, bold = false, maxWidth, multiline = false }: { label: string; fg?: string; bg?: string; bold?: boolean; maxWidth?: DimensionValue; multiline?: boolean }) {
   return (
-    <View style={{ paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, backgroundColor: bg, maxWidth }}>
-      <Text style={{ color: fg, fontSize: 11, fontWeight: bold ? '700' : '500' }} numberOfLines={1}>
+    <View style={{ paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, backgroundColor: bg, maxWidth, alignSelf: 'flex-start' }}>
+      <Text style={{ color: fg, fontSize: 11, fontWeight: bold ? '700' : '500', lineHeight: 16 }} numberOfLines={multiline ? undefined : 1}>
         {label}
       </Text>
     </View>
@@ -124,6 +125,54 @@ export function Toggle({ label, hint, value, onChange }: { label: string; hint?:
         <View style={{ width: 21, height: 21, borderRadius: 11, backgroundColor: '#fff', alignSelf: value ? 'flex-end' : 'flex-start' }} />
       </View>
     </Pressable>
+  );
+}
+
+/** 数值调节行：标签 + −/值/+（阅读行距、目标字数这类小步进设置用）。
+ *  format 自定义中间数值的展示（如 1.7 倍 / 3000 字）。 */
+export function StepperRow({
+  label,
+  hint,
+  value,
+  step,
+  min,
+  max,
+  onChange,
+  format,
+}: {
+  label: string;
+  hint?: string;
+  value: number;
+  step: number;
+  min: number;
+  max: number;
+  onChange: (v: number) => void;
+  format?: (v: number) => string;
+}) {
+  const btn = (dir: -1 | 1, glyph: string) => (
+    <Pressable
+      onPress={() => {
+        const next = Math.round(((value + dir * step) / step)) * step;
+        onChange(Math.max(min, Math.min(max, Number(next.toFixed(2)))));
+      }}
+      hitSlop={4}
+      style={{ width: 40, height: 40, borderRadius: 13, backgroundColor: C.card2, borderWidth: 1, borderColor: C.border, alignItems: 'center', justifyContent: 'center' }}
+    >
+      <Text style={{ color: C.text, fontSize: 18, fontWeight: '700', lineHeight: 22 }}>{glyph}</Text>
+    </Pressable>
+  );
+  return (
+    <View style={{ gap: 6 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+        <View style={{ flex: 1, gap: 1 }}>
+          <Text style={{ color: C.text, fontSize: 14, fontWeight: '600' }}>{label}</Text>
+          {hint ? <Text style={{ color: C.text3, fontSize: 11 }}>{hint}</Text> : null}
+        </View>
+        {btn(-1, '−')}
+        <Text style={{ color: C.gold, fontSize: 15, fontWeight: '800', minWidth: 56, textAlign: 'center' }}>{format ? format(value) : String(value)}</Text>
+        {btn(1, '+')}
+      </View>
+    </View>
   );
 }
 
@@ -227,8 +276,9 @@ export function ProgressBar({ pct, color = C.gold, height = 4, track = '#232A3C'
   );
 }
 
-/** 圆形页码章标 */
-export function ChapterBadge({ number, written }: { number: number; written: boolean }) {
+/** 圆形页码章标（1→N 模式子章显示 3.1 这类带小数点的号） */
+export function ChapterBadge({ number, written }: { number: number | string; written: boolean }) {
+  const label = String(number);
   return (
     <View
       style={{
@@ -242,8 +292,8 @@ export function ChapterBadge({ number, written }: { number: number; written: boo
         borderColor: written ? 'rgba(229,181,88,0.35)' : C.border,
       }}
     >
-      <Text style={{ color: written ? C.gold : C.text3, fontSize: 12, fontWeight: '700' }} numberOfLines={1}>
-        {number}
+      <Text style={{ color: written ? C.gold : C.text3, fontSize: label.length > 2 ? 10 : 12, fontWeight: '700' }} numberOfLines={1}>
+        {label}
       </Text>
     </View>
   );
@@ -416,6 +466,126 @@ export function SelectField({
                 );
               })}
             </ScrollView>
+          </View>
+        </View>
+      </Modal>
+    </View>
+  );
+}
+
+/** 实体多选字段：已选项显示为可删除的 chips，点开弹层从候选清单勾选 + 手动输入新名
+ *  （大纲的出场角色/涉及组织用；候选来自已有实体，新名允许手输——服务端存名字数组） */
+export function MultiSelectField({
+  label,
+  options,
+  value,
+  onChange,
+  placeholder = '选择或输入',
+  fg = C.text2,
+  bg = C.card2,
+}: {
+  label?: string;
+  options: string[];
+  value: string[];
+  onChange: (v: string[]) => void;
+  placeholder?: string;
+  fg?: string;
+  bg?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  /** 弹层里的临时勾选集合（确认才提交，取消不动 value） */
+  const [draft, setDraft] = useState<string[]>([]);
+  const [manual, setManual] = useState('');
+
+  const openPanel = () => {
+    setDraft(value);
+    setManual('');
+    setOpen(true);
+  };
+
+  const toggle = (name: string) => {
+    setDraft((d) => (d.includes(name) ? d.filter((x) => x !== name) : [...d, name]));
+  };
+
+  const addManual = () => {
+    const names = manual.split(/[,，、\n]+/).map((s) => s.trim()).filter(Boolean);
+    if (names.length === 0) return;
+    setDraft((d) => Array.from(new Set([...d, ...names])));
+    setManual('');
+  };
+
+  /** 候选 = 选项清单在前 + value 里不在清单的名字追加（历史手输值可见可取消） */
+  const candidates = Array.from(new Set([...options, ...value]));
+
+  return (
+    <View style={{ gap: 7 }}>
+      {label ? <FieldLabel>{label}</FieldLabel> : null}
+      <Pressable onPress={openPanel} style={{ backgroundColor: '#0F121B', borderWidth: 1, borderColor: '#242A3B', borderRadius: R.m, paddingHorizontal: 13, paddingVertical: 10, gap: 8 }}>
+        {value.length === 0 ? (
+          <Text style={{ color: '#5A6170', fontSize: 14.5 }}>{placeholder}</Text>
+        ) : (
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+            {value.map((n) => (
+              <Chip key={n} label={n} fg={fg} bg={bg} maxWidth={180} />
+            ))}
+          </View>
+        )}
+      </Pressable>
+
+      <Modal visible={open} animationType="slide" transparent onRequestClose={() => setOpen(false)} statusBarTranslucent navigationBarTranslucent>
+        <View style={{ flex: 1, justifyContent: 'flex-end' }}>
+          <Pressable onPress={() => setOpen(false)} style={{ position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, backgroundColor: 'rgba(0,0,0,0.55)' }} />
+          <View style={{ backgroundColor: '#141826', borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 20, paddingTop: 10, paddingBottom: 30, borderWidth: 1, borderColor: '#262C3F', maxHeight: '78%' }}>
+            <View style={{ width: 40, height: 4, borderRadius: 2, backgroundColor: '#313A52', alignSelf: 'center', marginBottom: 12 }} />
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
+              <Text style={{ color: C.text, fontSize: 16, fontWeight: '800', flex: 1 }}>{label ?? '选择'}</Text>
+              <Pressable onPress={() => setOpen(false)} hitSlop={8}>
+                <Ionicons name="close" size={21} color={C.text2} />
+              </Pressable>
+            </View>
+            <View style={{ flexDirection: 'row', gap: 8, marginBottom: 10 }}>
+              <TextInput
+                value={manual}
+                onChangeText={setManual}
+                onSubmitEditing={addManual}
+                placeholder="手动添加（逗号分隔）"
+                placeholderTextColor="#5A6170"
+                keyboardAppearance="dark"
+                style={{ flex: 1, backgroundColor: '#0F121B', borderWidth: 1, borderColor: '#242A3B', borderRadius: R.m, paddingHorizontal: 13, height: 42, color: C.text, fontSize: 14 }}
+              />
+              <Pressable onPress={addManual} style={{ width: 42, height: 42, borderRadius: R.m, backgroundColor: C.goldSoft, borderWidth: 1, borderColor: 'rgba(229,181,88,0.4)', alignItems: 'center', justifyContent: 'center' }}>
+                <Ionicons name="add" size={18} color={C.gold} />
+              </Pressable>
+            </View>
+            <ScrollView style={{ maxHeight: 340 }} contentContainerStyle={{ gap: 4 }}>
+              {candidates.map((name) => {
+                const on = draft.includes(name);
+                return (
+                  <Pressable
+                    key={name}
+                    onPress={() => toggle(name)}
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12, paddingHorizontal: 14, borderRadius: R.m, backgroundColor: on ? C.goldSoft : 'transparent', borderWidth: 1, borderColor: on ? 'rgba(229,181,88,0.4)' : 'transparent' }}
+                  >
+                    <View style={{ width: 20, height: 20, borderRadius: 7, borderWidth: 1.5, borderColor: on ? C.gold : '#3A4258', backgroundColor: on ? C.gold : 'transparent', alignItems: 'center', justifyContent: 'center' }}>
+                      {on ? <Ionicons name="checkmark" size={13} color="#1A1206" /> : null}
+                    </View>
+                    <Text style={{ color: on ? C.gold : C.text, fontSize: 14.5, fontWeight: on ? '700' : '500', flex: 1 }}>
+                      {name}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+              {candidates.length === 0 ? <Text style={{ color: C.text3, fontSize: 12.5, textAlign: 'center', paddingVertical: 14 }}>还没有候选，先在上方手动输入添加</Text> : null}
+            </ScrollView>
+            <Pressable
+              onPress={() => {
+                onChange(draft);
+                setOpen(false);
+              }}
+              style={{ height: 46, borderRadius: R.m, backgroundColor: C.gold, alignItems: 'center', justifyContent: 'center', marginTop: 10 }}
+            >
+              <Text style={{ color: '#1A1206', fontSize: 15, fontWeight: '800' }}>确定（已选 {draft.length}）</Text>
+            </Pressable>
           </View>
         </View>
       </Modal>

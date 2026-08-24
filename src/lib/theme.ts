@@ -55,11 +55,15 @@ export interface ReaderPrefs {
   fontSize: number;
   theme: ReaderThemeKey;
   fontKey: string;
+  /** 行距倍数（1.3–2.4，lineHeight = fontSize × 该值） */
+  lineSpacing: number;
+  /** 段间距（0–36 px，段与段之间的留白） */
+  paraSpacing: number;
   /** 导入的自定义字体显示名（fontKey==='custom' 时生效） */
   customFontLabel?: string;
 }
 
-export const DEFAULT_READER_PREFS: ReaderPrefs = { fontSize: 18, theme: 'night', fontKey: 'default' };
+export const DEFAULT_READER_PREFS: ReaderPrefs = { fontSize: 18, theme: 'night', fontKey: 'default', lineSpacing: 1.7, paraSpacing: 14 };
 
 /** 封面兜底渐变组（按项目ID取模），深色系配鎏金/朱砂/黛蓝 */
 export const COVER_GRADIENTS: readonly [string, string][] = [

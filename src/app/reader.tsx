@@ -11,7 +11,8 @@ import * as FileSystem from 'expo-file-system/legacy';
 import type { ChapterFull, ChapterNav } from '@/lib/api';
 import { ApiError } from '@/lib/api';
 import { friendlyError, loadReaderPrefs, saveLastRead, saveReaderPrefs, useAuth } from '@/lib/auth';
-import { SheetModal, SelectField, useToast } from '@/components/ui';
+import { AnalysisSheet } from '@/components/AnalysisSheet';
+import { SheetModal, SelectField, StepperRow, useToast } from '@/components/ui';
 import { getChapterVersion } from '@/lib/version';
 import { C, DEFAULT_READER_PREFS, READER_FONTS, READER_THEMES, type ReaderPrefs } from '@/lib/theme';
 
@@ -43,6 +44,7 @@ export default function ReaderScreen() {
   const loadedVersion = useRef(0);
   const [importingFont, setImportingFont] = useState(false);
   const [customFontReady, setCustomFontReady] = useState(false);
+  const [analysisOpen, setAnalysisOpen] = useState(false);
 
   const theme = useMemo(() => READER_THEMES.find((t) => t.key === prefs.theme) ?? READER_THEMES[0], [prefs.theme]);
   const isLight = prefs.theme !== 'night';
@@ -193,16 +195,17 @@ export default function ReaderScreen() {
     }
     return opts;
   }, [customFontReady, prefs.customFontLabel]);
-  const lineGap = Math.round(prefs.fontSize * 0.95);
+  /** 行距/段距可调：行高 = 字号 × 行距倍数，段距是段间留白（用户反馈阅读排版太挤不可调） */
+  const lineGap = Math.round(prefs.fontSize * prefs.lineSpacing);
   /** 正文段落元素缓存：打开设置面板/Toast 之类的界面态变化不再重渲整章几十上百个 Text */
   const paragraphEls = useMemo(
     () =>
       paragraphs.map((p, i) => (
-        <Text key={i} style={{ color: theme.text, fontSize: prefs.fontSize, lineHeight: lineGap, fontFamily: bodyFont, marginBottom: 14, textAlign: 'justify' }}>
+        <Text key={i} style={{ color: theme.text, fontSize: prefs.fontSize, lineHeight: lineGap, fontFamily: bodyFont, marginBottom: prefs.paraSpacing, textAlign: 'justify' }}>
           {p}
         </Text>
       )),
-    [paragraphs, theme.text, prefs.fontSize, lineGap, bodyFont],
+    [paragraphs, theme.text, prefs.fontSize, lineGap, prefs.paraSpacing, bodyFont],
   );
 
   return (
@@ -227,6 +230,13 @@ export default function ReaderScreen() {
           style={{ width: 34, height: 34, borderRadius: 11, backgroundColor: theme.card, alignItems: 'center', justifyContent: 'center' }}
         >
           <Ionicons name="create-outline" size={17} color={theme.text} />
+        </Pressable>
+        <Pressable
+          onPress={() => setAnalysisOpen(true)}
+          hitSlop={8}
+          style={{ width: 34, height: 34, borderRadius: 11, backgroundColor: theme.card, alignItems: 'center', justifyContent: 'center' }}
+        >
+          <Ionicons name="stats-chart-outline" size={16} color={theme.text} />
         </Pressable>
         <Pressable
           onPress={() => setPanelOpen(true)}
@@ -290,14 +300,7 @@ export default function ReaderScreen() {
             <View style={{ width: 26, height: 2, borderRadius: 1, backgroundColor: C.gold, opacity: 0.85 }} />
             <Text style={{ color: theme.sub, fontSize: 11.5 }}>共 {chapter.word_count} 字</Text>
           </View>
-          {paragraphs.map((p, i) => (
-            <Text
-              key={i}
-              style={{ color: theme.text, fontSize: prefs.fontSize, lineHeight: lineGap, fontFamily: bodyFont, marginBottom: 14, textAlign: 'justify' }}
-            >
-              {p}
-            </Text>
-          ))}
+          {paragraphEls}
           <View style={{ alignItems: 'center', gap: 14, marginTop: 26 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
               <View style={{ width: 30, height: 1, backgroundColor: theme.sub, opacity: 0.5 }} />
@@ -371,6 +374,28 @@ export default function ReaderScreen() {
           </Pressable>
         </View>
 
+        <StepperRow
+          label="行距"
+          hint="行与行之间的疏密"
+          value={prefs.lineSpacing}
+          step={0.1}
+          min={1.3}
+          max={2.4}
+          format={(v) => `${v.toFixed(1)} 倍`}
+          onChange={(v) => updatePrefs({ lineSpacing: v })}
+        />
+
+        <StepperRow
+          label="段间距"
+          hint="段与段之间的留白"
+          value={prefs.paraSpacing}
+          step={2}
+          min={0}
+          max={36}
+          format={(v) => `${v}`}
+          onChange={(v) => updatePrefs({ paraSpacing: v })}
+        />
+
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
           <Text style={{ color: C.text2, fontSize: 13, width: 44 }}>背景</Text>
           {READER_THEMES.map((t) => (
@@ -427,6 +452,17 @@ export default function ReaderScreen() {
           </Text>
         </View>
       </SheetModal>
+
+      {/* 章节剧情分析（评分 / 一致性 / 建议） */}
+      {chapter ? (
+        <AnalysisSheet
+          projectId={projectId}
+          chapterNumber={chapter.chapter_number}
+          chapterId={chapterId}
+          visible={analysisOpen}
+          onClose={() => setAnalysisOpen(false)}
+        />
+      ) : null}
     </View>
   );
 }

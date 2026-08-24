@@ -34,6 +34,10 @@ export interface ProjectDetail {
   cover_prompt?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
+  /** 大纲模式：one_to_one（一章一卷）/ one_to_many（一卷展开 N 章） */
+  outline_mode?: string;
+  /** 当前绑定的写作风格（服务端存对象：{style_id, name, custom_prompt, …}，展示用 name） */
+  writing_style?: { style_id?: number; name?: string; [k: string]: unknown } | null;
 }
 
 export interface ChapterRow {
@@ -46,6 +50,9 @@ export interface ChapterRow {
   summary?: string | null;
   can_generate?: boolean;
   generate_disabled_reason?: string | null;
+  /** 1→N 卷→章模式下子章节的序号（如 3.1、3.2 里的 1、2） */
+  sub_index?: number | null;
+  generation_mode?: string;
 }
 
 export interface ChapterFull {
@@ -57,6 +64,9 @@ export interface ChapterFull {
   status: string;
   summary?: string | null;
   quality_score?: number | null;
+  /** 润色前的原文（没润色过为空；整章润色会覆盖 content，原文存这里可回滚） */
+  raw_output?: string | null;
+  raw_word_count?: number | null;
 }
 
 export interface NavNeighbor {
@@ -85,6 +95,9 @@ export interface OutlineItem {
   characters?: unknown[] | null;
   organizations?: unknown[] | null;
   structure?: Record<string, unknown> | null;
+  /** 1→N 模式：该卷是否已展开成章 / 展开的章数 */
+  has_chapters?: boolean;
+  chapter_count?: number;
 }
 
 export interface CharacterItem {
@@ -233,6 +246,220 @@ export interface ProjectUpdateBody {
   target_platform?: string;
   pen_name?: string;
   status?: string;
+}
+
+// ===== 故事蓝图 =====
+export interface BlueprintMilestone {
+  title: string;
+  description?: string;
+  [k: string]: unknown;
+}
+
+export interface Blueprint {
+  id: number;
+  level: 'book' | 'volume' | string;
+  volume_index?: number | null;
+  title: string;
+  start_chapter?: number | null;
+  end_chapter?: number | null;
+  theme?: string | null;
+  main_conflict?: string | null;
+  protagonist_growth?: string | null;
+  key_milestones?: BlueprintMilestone[] | null;
+  foreshadows_plan?: string | null;
+  plot_arc?: string | null;
+  plot_stage_guide?: unknown[] | null;
+  structure?: Record<string, unknown> | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface BlueprintQueryResult {
+  book: Blueprint | null;
+  volumes: Blueprint[];
+}
+
+// ===== 组织 / 地点 / 物品 / 职业 =====
+export interface OrganizationItem {
+  id: number;
+  name: string;
+  org_type?: string | null;
+  description?: string | null;
+}
+
+export interface LocationItem {
+  id: number;
+  name: string;
+  location_type?: string | null;
+  description?: string | null;
+  atmosphere?: string | null;
+  geography?: string | null;
+  faction_control?: string | null;
+  importance?: string | null;
+  danger_level?: string | null;
+  first_appear_chapter?: number | null;
+}
+
+export interface ItemEntity {
+  id: number;
+  name: string;
+  category?: string | null;
+  rarity?: string | null;
+  description?: string | null;
+  owner_name?: string | null;
+  obtained_chapter?: number | null;
+  status?: string | null;
+  is_key_item?: boolean | number | null;
+}
+
+export const ITEM_RARITY_LABEL: Record<string, string> = {
+  common: '普通',
+  uncommon: '精良',
+  rare: '稀有',
+  epic: '史诗',
+  legendary: '传说',
+  mythic: '神话',
+};
+
+export const ITEM_STATUS_LABEL: Record<string, string> = {
+  in_use: '使用中',
+  stored: '已存放',
+  consumed: '已消耗',
+  lost: '遗失',
+  destroyed: '已损毁',
+};
+
+export interface CareerStage {
+  name?: string;
+  description?: string;
+  requirement?: string;
+  ability?: string;
+  [k: string]: unknown;
+}
+
+export interface CareerItem {
+  id: number;
+  name: string;
+  career_type: 'main' | 'sub' | string;
+  category?: string | null;
+  description?: string | null;
+  stages?: CareerStage[] | null;
+  abilities?: { name?: string; [k: string]: unknown }[] | string[] | null;
+}
+
+// ===== 写作风格 =====
+export interface WritingStyleItem {
+  id: number;
+  name: string;
+  description?: string | null;
+  author_name?: string | null;
+  custom_prompt?: string | null;
+  reference_text?: string | null;
+  is_preset?: boolean;
+  is_default?: boolean;
+  created_at?: string | null;
+}
+
+// ===== 章节剧情分析（8 维评分） =====
+export interface ChapterAnalysis {
+  id: number;
+  chapter_number: number;
+  plot_stage?: string | null;
+  pacing?: string | null;
+  dialogue_ratio?: number | null;
+  description_ratio?: number | null;
+  quality_scores?: Record<string, unknown> | null;
+  suggestions?: string[] | null;
+  consistency_issues?: unknown[] | null;
+  analysis_report?: string | null;
+  hooks?: Record<string, unknown> | null;
+  conflicts?: unknown[] | null;
+}
+
+export const ANALYSIS_SCORE_LABEL: Record<string, string> = {
+  overall: '总分',
+  pacing: '节奏',
+  ai_flavor: 'AI 味',
+  coherence_logic: '逻辑连贯',
+  writing_quality: '文笔质量',
+  character_dialogue: '人物对话',
+  world_consistency: '世界观一致',
+  commercial_appeal: '商业吸引力',
+  score_justification: 'score_justification',
+};
+
+// ===== 章节重写历史 =====
+export interface RegenTask {
+  id: number;
+  chapter_id: number;
+  modification_instructions?: string | null;
+  version_number?: number | null;
+  version_note?: string | null;
+  original_word_count?: number | null;
+  regenerated_word_count?: number | null;
+  regenerated_content?: string | null;
+  original_content?: string | null;
+  diff_ratio?: number | null;
+  is_applied?: number | boolean | null;
+  status?: string | null;
+  error?: string | null;
+  created_at?: string | null;
+  completed_at?: string | null;
+}
+
+// ===== 1→N 卷→章：卷下子章节 =====
+export interface OutlineSubChapter {
+  id: number;
+  chapter_number: number;
+  sub_index?: number | null;
+  title?: string | null;
+  summary?: string | null;
+  status?: string | null;
+}
+
+// ===== 项目设定（各开关端点的 GET/PUT 载荷） =====
+export interface OutlineOptions {
+  auto_fill_entities: boolean;
+  auto_plan_foreshadows: boolean;
+}
+
+export interface AutoRewriteOptions {
+  auto_rewrite_low_score: boolean;
+  auto_rewrite_threshold: number;
+}
+
+export interface BestofOptions {
+  golden3_bestof2: boolean;
+  climax_bestof2: boolean;
+}
+
+export interface FinalRoundCacheOptions {
+  final_round_keep_tools: boolean;
+  final_round_json_align: boolean;
+}
+
+export interface ChapterTargetOptions {
+  chapter_target_words: number;
+}
+
+export interface OutlineBatchOptions {
+  outline_batch_size: number;
+}
+
+export interface EnglishExcludeOptions {
+  english_scan_exclude: string;
+}
+
+export interface PromptModules {
+  modules: Record<string, boolean>;
+  modules_info?: Record<string, { label?: string; group?: string; desc?: string; [k: string]: unknown }> | null;
+}
+
+export type ThinkingModes = Record<string, { enabled: boolean; reasoning_effort?: string; temperature?: number }>;
+
+export interface SourceCanonOptions {
+  source_canon: string;
+  is_fanfic: boolean;
 }
 
 export const FORESHADOW_STATUS_LABEL: Record<string, string> = {
@@ -603,6 +830,354 @@ export class Api {
     return this.req<{ task_id: number }>(`/api/projects/${projectId}/auto-write/start`, {
       method: 'POST',
       body: JSON.stringify(body),
+    });
+  }
+
+  // ===== 故事蓝图 =====
+  getBlueprints(projectId: number) {
+    return this.req<BlueprintQueryResult>(`/api/projects/${projectId}/blueprints?level=all`);
+  }
+
+  /** AI 生成/重做全书蓝图（异步任务，会覆盖现有蓝图） */
+  generateBlueprintAsync(projectId: number, userPrompt = '') {
+    return this.req<{ task_id: number }>(`/api/projects/${projectId}/blueprints/generate-async`, {
+      method: 'POST',
+      body: JSON.stringify({ user_prompt: userPrompt }),
+    });
+  }
+
+  /** AI 续写全书蓝图（在现有蓝图之后延伸新故事弧线，不覆盖前段） */
+  continueBlueprintAsync(projectId: number, userPrompt = '') {
+    return this.req<{ task_id: number }>(`/api/projects/${projectId}/blueprints/continue-async`, {
+      method: 'POST',
+      body: JSON.stringify({ user_prompt: userPrompt }),
+    });
+  }
+
+  /** AI 规划某一篇的详细路线（异步任务） */
+  planVolumeAsync(projectId: number, volumeIndex: number, userPrompt = '') {
+    return this.req<{ task_id: number }>(`/api/projects/${projectId}/blueprints/plan-volume-async`, {
+      method: 'POST',
+      body: JSON.stringify({ volume_index: volumeIndex, user_prompt: userPrompt }),
+    });
+  }
+
+  /** 手动编辑蓝图字段（服务端按非空字段部分更新；ending_direction 仅全书级，起止章仅分篇级） */
+  updateBlueprint(
+    projectId: number,
+    blueprintId: number,
+    body: {
+      title?: string;
+      theme?: string;
+      main_conflict?: string;
+      protagonist_growth?: string;
+      plot_arc?: string;
+      foreshadows_plan?: string;
+      ending_direction?: string;
+      start_chapter?: number;
+      end_chapter?: number;
+    },
+  ) {
+    return this.req<{ ok: boolean }>(`/api/projects/${projectId}/blueprints/${blueprintId}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    });
+  }
+
+  // ===== 组织 =====
+  getOrganizations(projectId: number) {
+    return this.req<OrganizationItem[]>(`/api/projects/${projectId}/organizations`);
+  }
+
+  createOrganization(projectId: number, body: { name: string; org_type?: string; description?: string; power_value?: number; location?: string }) {
+    return this.req<{ id: number }>(`/api/projects/${projectId}/organizations`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
+  updateOrganization(projectId: number, orgId: number, body: { name?: string; org_type?: string; description?: string; power_value?: number; location?: string }) {
+    return this.req<{ ok: boolean }>(`/api/projects/${projectId}/organizations/${orgId}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    });
+  }
+
+  deleteOrganization(projectId: number, orgId: number) {
+    return this.req<{ ok: boolean }>(`/api/projects/${projectId}/organizations/${orgId}`, { method: 'DELETE' });
+  }
+
+  generateOrganizationsAsync(projectId: number, count: number, userInput = '') {
+    return this.req<{ task_id: number }>(`/api/projects/${projectId}/organizations/generate-async`, {
+      method: 'POST',
+      body: JSON.stringify({ count, user_input: userInput }),
+    });
+  }
+
+  // ===== 地点 =====
+  getLocations(projectId: number) {
+    return this.req<LocationItem[]>(`/api/projects/${projectId}/locations`);
+  }
+
+  createLocation(projectId: number, body: { name: string; location_type?: string; description?: string; atmosphere?: string; geography?: string; importance?: string; danger_level?: string }) {
+    return this.req<{ id: number }>(`/api/projects/${projectId}/locations`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
+  updateLocation(projectId: number, locationId: number, body: { name?: string; location_type?: string; description?: string; atmosphere?: string; geography?: string; importance?: string; danger_level?: string }) {
+    return this.req<{ ok: boolean }>(`/api/projects/${projectId}/locations/${locationId}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    });
+  }
+
+  deleteLocation(projectId: number, locationId: number) {
+    return this.req<{ ok: boolean }>(`/api/projects/${projectId}/locations/${locationId}`, { method: 'DELETE' });
+  }
+
+  generateLocationsAsync(projectId: number, count: number, locationType = '', userPrompt = '') {
+    return this.req<{ task_id: number }>(`/api/projects/${projectId}/locations/generate-async`, {
+      method: 'POST',
+      body: JSON.stringify({ count, location_type: locationType, user_prompt: userPrompt }),
+    });
+  }
+
+  // ===== 物品 =====
+  getItems(projectId: number) {
+    return this.req<ItemEntity[]>(`/api/projects/${projectId}/items`);
+  }
+
+  createItem(projectId: number, body: { name: string; category?: string; rarity?: string; description?: string; owner_name?: string; status?: string; is_key_item?: number }) {
+    return this.req<{ id: number }>(`/api/projects/${projectId}/items`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
+  updateItem(projectId: number, itemId: number, body: { name?: string; category?: string; rarity?: string; description?: string; owner_name?: string; status?: string; is_key_item?: number }) {
+    return this.req<{ ok: boolean }>(`/api/projects/${projectId}/items/${itemId}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    });
+  }
+
+  deleteItem(projectId: number, itemId: number) {
+    return this.req<{ ok: boolean }>(`/api/projects/${projectId}/items/${itemId}`, { method: 'DELETE' });
+  }
+
+  generateItemsAsync(projectId: number, count: number, category = '', userPrompt = '') {
+    return this.req<{ task_id: number }>(`/api/projects/${projectId}/items/generate-async`, {
+      method: 'POST',
+      body: JSON.stringify({ count, category, user_prompt: userPrompt }),
+    });
+  }
+
+  // ===== 职业体系 =====
+  getCareers(projectId: number) {
+    return this.req<CareerItem[]>(`/api/projects/${projectId}/careers`);
+  }
+
+  createCareer(projectId: number, body: { name: string; career_type?: string; category?: string; description?: string; stages?: CareerStage[]; abilities?: unknown[] }) {
+    return this.req<{ id: number }>(`/api/projects/${projectId}/careers`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
+  updateCareer(projectId: number, careerId: number, body: { name?: string; career_type?: string; category?: string; description?: string; stages?: CareerStage[]; abilities?: unknown[] }) {
+    return this.req<{ ok: boolean }>(`/api/projects/${projectId}/careers/${careerId}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    });
+  }
+
+  deleteCareer(projectId: number, careerId: number) {
+    return this.req<{ ok: boolean }>(`/api/projects/${projectId}/careers/${careerId}`, { method: 'DELETE' });
+  }
+
+  /** AI 生成职业体系（异步任务）。append=true 在已有体系后追加 */
+  generateCareerSystemAsync(projectId: number, body: { append?: boolean; count?: number; career_type?: string; user_prompt?: string }) {
+    return this.req<{ task_id: number }>(`/api/projects/${projectId}/career-system/generate-async`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
+  /** AI 自动给角色分配主职业（同步接口，直写角色的 main_career） */
+  autoAssignCareers(projectId: number, userPrompt = '') {
+    return this.req<{ count: number }>(`/api/projects/${projectId}/character-careers/auto-assign`, {
+      method: 'POST',
+      body: JSON.stringify({ user_prompt: userPrompt }),
+    });
+  }
+
+  // ===== 写作风格（用户级接口，前缀 /api/writing-styles） =====
+  getWritingStyles() {
+    return this.req<WritingStyleItem[]>(`/api/writing-styles`);
+  }
+
+  /** 把风格绑定到项目（影响后续生成的文风） */
+  applyWritingStyle(styleId: number, projectId: number) {
+    return this.req<{ ok: boolean; style_name: string }>(`/api/writing-styles/${styleId}/apply/${projectId}`, { method: 'POST' });
+  }
+
+  /** 设为用户跨项目默认风格 */
+  setDefaultWritingStyle(styleId: number) {
+    return this.req<{ ok: boolean }>(`/api/writing-styles/${styleId}/set-default`, { method: 'POST' });
+  }
+
+  createWritingStyle(body: { name: string; description?: string; author_name?: string; custom_prompt?: string; reference_text?: string }) {
+    return this.req<{ id: number }>(`/api/writing-styles`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
+  updateWritingStyle(styleId: number, body: { name?: string; description?: string; author_name?: string; custom_prompt?: string; reference_text?: string }) {
+    return this.req<{ ok: boolean }>(`/api/writing-styles/${styleId}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    });
+  }
+
+  deleteWritingStyle(styleId: number) {
+    return this.req<{ ok: boolean }>(`/api/writing-styles/${styleId}`, { method: 'DELETE' });
+  }
+
+  // ===== 章节剧情分析 =====
+  /** 按章号取剧情分析。没有分析过时服务端返回 404（调用方据此显示「生成分析」入口） */
+  getChapterAnalysis(projectId: number, chapterNumber: number) {
+    return this.req<ChapterAnalysis>(`/api/projects/${projectId}/analyses/${chapterNumber}`);
+  }
+
+  /** 提交单章剧情分析（异步任务；幂等，已有任务在跑会返回原任务） */
+  analyzeChapterAsync(projectId: number, chapterId: number) {
+    return this.req<{ task_id: number }>(`/api/projects/${projectId}/chapters/${chapterId}/analyze`, { method: 'POST' });
+  }
+
+  // ===== 章节润色 =====
+  /** 整章 AI 润色（异步任务，完成后服务端直接写回章节，原文备份到 raw_output 可回滚） */
+  polishChaptersAsync(projectId: number, chapterIds: number[], skill: 'ai_denoising' | 'humanize_pro', userInstructions = '') {
+    return this.req<{ task_id: number }>(`/api/projects/${projectId}/chapters/batch-polish`, {
+      method: 'POST',
+      body: JSON.stringify({ chapter_ids: chapterIds, skill, user_instructions: userInstructions }),
+    });
+  }
+
+  // ===== 章节重写 =====
+  /** 提交整章重写（异步任务，只产草稿不覆盖正文；完成后在重写面板对比应用） */
+  regenerateChapterAsync(projectId: number, chapterId: number, instructions: string, includeAnalysis = true) {
+    return this.req<{ task_id: number }>(`/api/projects/${projectId}/chapters/${chapterId}/regenerate/async`, {
+      method: 'POST',
+      body: JSON.stringify({ instructions, include_analysis: includeAnalysis }),
+    });
+  }
+
+  /** 重写历史列表 */
+  getRegenTasks(projectId: number, chapterId: number, limit = 20) {
+    return this.req<RegenTask[]>(`/api/projects/${projectId}/chapters/${chapterId}/regeneration/tasks?limit=${limit}`);
+  }
+
+  /** 最新未应用的重写草稿（null=没有待应用草稿） */
+  getRegenPending(projectId: number, chapterId: number) {
+    return this.req<RegenTask | null>(`/api/projects/${projectId}/chapters/${chapterId}/regeneration/pending`);
+  }
+
+  /** 应用重写草稿（覆盖章节正文） */
+  applyRegenTask(projectId: number, chapterId: number, taskId: number) {
+    return this.req<{ ok: boolean; word_count: number }>(`/api/projects/${projectId}/chapters/${chapterId}/regeneration/${taskId}/apply`, { method: 'POST' });
+  }
+
+  // ===== 大纲 1→N 卷→章 =====
+  /** 卷下已展开的子章节列表（子章有独立 chapter id，可直接进阅读器） */
+  getOutlineChapters(projectId: number, outlineId: number) {
+    return this.req<{ has_chapters: boolean; chapter_count: number; chapters: OutlineSubChapter[] }>(`/api/projects/${projectId}/outlines/${outlineId}/chapters`);
+  }
+
+  /** AI 把一卷大纲展开成 N 章（异步任务） */
+  expandOutlineAsync(projectId: number, outlineId: number, targetChapterCount: number, mode = 'append', strategy = 'balanced') {
+    return this.req<{ task_id: number }>(`/api/projects/${projectId}/outlines/${outlineId}/expand-async`, {
+      method: 'POST',
+      body: JSON.stringify({ target_chapter_count: targetChapterCount, mode, strategy }),
+    });
+  }
+
+  /** 批量展开全部未展开的卷（异步任务，仅 1→N 模式可用） */
+  batchExpandOutlinesAsync(projectId: number, targetChapterCount: number) {
+    return this.req<{ task_id: number; pending_count: number }>(`/api/projects/${projectId}/outlines/batch-expand-async`, {
+      method: 'POST',
+      body: JSON.stringify({ target_chapter_count: targetChapterCount }),
+    });
+  }
+
+  // ===== 项目设定（一组独立 GET/PUT 端点，全部挂在项目下） =====
+  getOutlineOptions(projectId: number) {
+    return this.req<OutlineOptions>(`/api/projects/${projectId}/outline-options`);
+  }
+  updateOutlineOptions(projectId: number, body: OutlineOptions) {
+    return this.req<{ ok: boolean }>(`/api/projects/${projectId}/outline-options`, { method: 'PUT', body: JSON.stringify(body) });
+  }
+  getAutoRewrite(projectId: number) {
+    return this.req<AutoRewriteOptions>(`/api/projects/${projectId}/auto-rewrite`);
+  }
+  updateAutoRewrite(projectId: number, body: AutoRewriteOptions) {
+    return this.req<{ ok: boolean }>(`/api/projects/${projectId}/auto-rewrite`, { method: 'PUT', body: JSON.stringify(body) });
+  }
+  getBestof(projectId: number) {
+    return this.req<BestofOptions>(`/api/projects/${projectId}/bestof-generate`);
+  }
+  updateBestof(projectId: number, body: BestofOptions) {
+    return this.req<{ ok: boolean }>(`/api/projects/${projectId}/bestof-generate`, { method: 'PUT', body: JSON.stringify(body) });
+  }
+  getFinalRoundCache(projectId: number) {
+    return this.req<FinalRoundCacheOptions>(`/api/projects/${projectId}/final-round-cache`);
+  }
+  updateFinalRoundCache(projectId: number, body: FinalRoundCacheOptions) {
+    return this.req<{ ok: boolean }>(`/api/projects/${projectId}/final-round-cache`, { method: 'PUT', body: JSON.stringify(body) });
+  }
+  getChapterTarget(projectId: number) {
+    return this.req<ChapterTargetOptions>(`/api/projects/${projectId}/chapter-target`);
+  }
+  updateChapterTarget(projectId: number, body: ChapterTargetOptions) {
+    return this.req<{ ok: boolean }>(`/api/projects/${projectId}/chapter-target`, { method: 'PUT', body: JSON.stringify(body) });
+  }
+  getOutlineBatchSize(projectId: number) {
+    return this.req<OutlineBatchOptions>(`/api/projects/${projectId}/outline-batch-size`);
+  }
+  updateOutlineBatchSize(projectId: number, body: OutlineBatchOptions) {
+    return this.req<{ ok: boolean }>(`/api/projects/${projectId}/outline-batch-size`, { method: 'PUT', body: JSON.stringify(body) });
+  }
+  getEnglishExclude(projectId: number) {
+    return this.req<EnglishExcludeOptions>(`/api/projects/${projectId}/english-exclude`);
+  }
+  updateEnglishExclude(projectId: number, body: EnglishExcludeOptions) {
+    return this.req<{ ok: boolean }>(`/api/projects/${projectId}/english-exclude`, { method: 'PUT', body: JSON.stringify(body) });
+  }
+  getPromptModules(projectId: number) {
+    return this.req<PromptModules>(`/api/projects/${projectId}/prompt-modules`);
+  }
+  updatePromptModules(projectId: number, modules: Record<string, boolean>) {
+    return this.req<{ ok: boolean }>(`/api/projects/${projectId}/prompt-modules`, { method: 'PUT', body: JSON.stringify({ modules }) });
+  }
+  getThinkingModes(projectId: number) {
+    return this.req<{ modes: ThinkingModes }>(`/api/projects/${projectId}/thinking-modes`);
+  }
+  updateThinkingModes(projectId: number, modes: ThinkingModes) {
+    return this.req<{ ok: boolean }>(`/api/projects/${projectId}/thinking-modes`, { method: 'PUT', body: JSON.stringify({ modes }) });
+  }
+  getSourceCanon(projectId: number) {
+    return this.req<SourceCanonOptions>(`/api/projects/${projectId}/source-canon`);
+  }
+  updateSourceCanon(projectId: number, body: { source_canon: string }) {
+    return this.req<{ ok: boolean }>(`/api/projects/${projectId}/source-canon`, { method: 'PUT', body: JSON.stringify(body) });
+  }
+  /** AI 生成原作设定圣经（同人项目用，异步任务） */
+  generateSourceCanonAsync(projectId: number, sourceTitles: string[], userBrief = '') {
+    return this.req<{ task_id: number }>(`/api/projects/${projectId}/source-canon/generate`, {
+      method: 'POST',
+      body: JSON.stringify({ source_titles: sourceTitles, user_brief: userBrief }),
     });
   }
 

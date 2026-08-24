@@ -39,6 +39,8 @@ function Root() {
         <Stack.Screen name="login" options={{ animation: 'fade' }} />
         <Stack.Screen name="create-book" />
         <Stack.Screen name="project/[id]" />
+        <Stack.Screen name="project-settings" />
+        <Stack.Screen name="styles" />
         <Stack.Screen name="reader" options={{ animation: 'slide_from_bottom', animationDuration: 260 }} />
         <Stack.Screen name="editor" />
       </Stack>
