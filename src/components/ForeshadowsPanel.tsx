@@ -311,7 +311,7 @@ export function ForeshadowsPanel({ projectId }: { projectId: number }) {
         </Pressable>
       </View>
 
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 7 }}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0 }} contentContainerStyle={{ gap: 7 }}>
         {FILTERS.map((f) => {
           const on = filter === f.key;
           return (

@@ -209,10 +209,12 @@ export function Skeleton({ count = 3, height = 116, style }: { count?: number; h
   );
 }
 
-/** 分段标签（可横向滚动，适配多分栏） */
+/** 分段标签（可横向滚动，适配多分栏）。
+ *  style 必须 flexGrow:0：RN 横向 ScrollView 自带 flexGrow:1，页面内容不足一屏时
+ *  会把剩余高度全吞掉，行内胶囊被 alignItems:stretch 拉成竖长条（空项目 Tab 栏实测复现）。 */
 export function SegmentedTabs({ tabs, active, onChange }: { tabs: { key: string; label: string }[]; active: string; onChange: (key: string) => void }) {
   return (
-    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingHorizontal: 1, paddingVertical: 1 }}>
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0 }} contentContainerStyle={{ gap: 8, paddingHorizontal: 1, paddingVertical: 1 }}>
       {tabs.map((t) => {
         const on = t.key === active;
         return (

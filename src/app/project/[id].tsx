@@ -15,7 +15,7 @@ import { CoverArt } from '@/components/CoverArt';
 import type { ChapterRow, OutlineItem, ProjectDetail, WritingStyleItem } from '@/lib/api';
 import { ApiError } from '@/lib/api';
 import { friendlyError, loadLastRead, useAuth } from '@/lib/auth';
-import { fmtPercent, fmtRelative, fmtWords, STORY_KIND_LABEL } from '@/lib/format';
+import { fmtDate, fmtPercent, fmtRelative, fmtWords, STORY_KIND_LABEL } from '@/lib/format';
 import { C, R, SP } from '@/lib/theme';
 
 type TabKey = 'chapters' | 'outlines' | 'blueprint' | 'characters' | 'world' | 'foreshadow' | 'about';
@@ -847,7 +847,7 @@ export default function ProjectScreen() {
                 <InfoRow label="写作风格" value={typeof project.writing_style?.name === 'string' ? project.writing_style.name : undefined} />
                 <InfoRow label="目标平台" value={project.target_platform ?? undefined} />
                 <InfoRow label="目标字数" value={project.target_word_count ? fmtWords(project.target_word_count) : undefined} />
-                <InfoRow label="创建时间" value={project.created_at?.slice(0, 10)} />
+                <InfoRow label="创建时间" value={fmtDate(project.created_at)} />
                 <InfoRow label="最近更新" value={project.updated_at ? fmtRelative(project.updated_at) : undefined} />
                 </View>
               </>

@@ -216,7 +216,7 @@ export function PortraitSheet({
 
         <View style={{ gap: 8 }}>
           <FieldLabel>画风</FieldLabel>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 7 }}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0 }} contentContainerStyle={{ gap: 7 }}>
             {STYLES.map((s) => (
               <Pressable key={s.key} onPress={() => setStyle(s.key)}>
                 <Chip label={s.label} fg={style === s.key ? C.gold : C.text2} bg={style === s.key ? C.goldSoft : C.card2} bold={style === s.key} />
