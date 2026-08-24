@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import React, { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { Animated, Modal, Pressable, ScrollView, Text, TextInput, View, useWindowDimensions, type DimensionValue, type ViewStyle } from 'react-native';
+import { Animated, Keyboard, Modal, Pressable, ScrollView, Text, TextInput, View, useWindowDimensions, type DimensionValue, type ViewStyle } from 'react-native';
 
 import { C, R } from '@/lib/theme';
 
@@ -496,6 +496,17 @@ export function MultiSelectField({
   /** 弹层里的临时勾选集合（确认才提交，取消不动 value） */
   const [draft, setDraft] = useState<string[]>([]);
   const [manual, setManual] = useState('');
+  /** 键盘高度：手动输入框弹键盘时把弹层抬到键盘上方（edge-to-edge 下系统不再代劳） */
+  const { height: winH } = useWindowDimensions();
+  const [kbH, setKbH] = useState(0);
+  useEffect(() => {
+    const s = Keyboard.addListener('keyboardDidShow', (e) => setKbH(e.endCoordinates.height));
+    const h = Keyboard.addListener('keyboardDidHide', () => setKbH(0));
+    return () => {
+      s.remove();
+      h.remove();
+    };
+  }, []);
 
   const openPanel = () => {
     setDraft(value);
@@ -533,9 +544,9 @@ export function MultiSelectField({
       </Pressable>
 
       <Modal visible={open} animationType="slide" transparent onRequestClose={() => setOpen(false)} statusBarTranslucent navigationBarTranslucent>
-        <View style={{ flex: 1, justifyContent: 'flex-end' }}>
+        <View style={{ flex: 1, justifyContent: 'flex-end', paddingBottom: kbH }}>
           <Pressable onPress={() => setOpen(false)} style={{ position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, backgroundColor: 'rgba(0,0,0,0.55)' }} />
-          <View style={{ backgroundColor: '#141826', borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 20, paddingTop: 10, paddingBottom: 30, borderWidth: 1, borderColor: '#262C3F', maxHeight: '78%' }}>
+          <View style={{ backgroundColor: '#141826', borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 20, paddingTop: 10, paddingBottom: 30, borderWidth: 1, borderColor: '#262C3F', maxHeight: Math.max(240, Math.round(winH * 0.78) - kbH) }}>
             <View style={{ width: 40, height: 4, borderRadius: 2, backgroundColor: '#313A52', alignSelf: 'center', marginBottom: 12 }} />
             <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
               <Text style={{ color: C.text, fontSize: 16, fontWeight: '800', flex: 1 }}>{label ?? '选择'}</Text>
@@ -557,7 +568,7 @@ export function MultiSelectField({
                 <Ionicons name="add" size={18} color={C.gold} />
               </Pressable>
             </View>
-            <ScrollView style={{ maxHeight: 340 }} contentContainerStyle={{ gap: 4 }}>
+            <ScrollView style={{ maxHeight: Math.max(140, 340 - kbH) }} contentContainerStyle={{ gap: 4 }}>
               {candidates.map((name) => {
                 const on = draft.includes(name);
                 return (
@@ -605,7 +616,18 @@ export function SheetModal({ visible, onClose, title, children }: { visible: boo
   const { height: winH } = useWindowDimensions();
   const scrollRef = useRef<ScrollView>(null);
   const [contentH, setContentH] = useState(0);
-  const maxScrollH = Math.round(winH * 0.62);
+  /** 键盘高度：edge-to-edge 下 Modal 也不会被系统压缩（键盘直接盖住面板底部的输入框），
+   *  垫在弹层容器底部把面板抬到键盘上方，同时按可用高度收窄面板/滚动区上限 */
+  const [kbH, setKbH] = useState(0);
+  useEffect(() => {
+    const s = Keyboard.addListener('keyboardDidShow', (e) => setKbH(e.endCoordinates.height));
+    const h = Keyboard.addListener('keyboardDidHide', () => setKbH(0));
+    return () => {
+      s.remove();
+      h.remove();
+    };
+  }, []);
+  const maxScrollH = Math.max(160, Math.round(winH * 0.62) - kbH);
 
   useEffect(() => {
     if (visible) {
@@ -619,7 +641,7 @@ export function SheetModal({ visible, onClose, title, children }: { visible: boo
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose} statusBarTranslucent navigationBarTranslucent>
-      <View style={{ flex: 1, justifyContent: 'flex-end' }}>
+      <View style={{ flex: 1, justifyContent: 'flex-end', paddingBottom: kbH }}>
         <Pressable
           onPress={onClose}
           style={{ position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, backgroundColor: 'rgba(0,0,0,0.55)' }}
@@ -632,7 +654,7 @@ export function SheetModal({ visible, onClose, title, children }: { visible: boo
             paddingHorizontal: 20,
             paddingTop: 10,
             paddingBottom: 36,
-            maxHeight: Math.round(winH * 0.88),
+            maxHeight: Math.max(240, Math.round(winH * 0.88) - kbH),
             borderWidth: 1,
             borderColor: '#262C3F',
           }}

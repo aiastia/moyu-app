@@ -102,7 +102,15 @@ export default function EditorScreen() {
   const [kbH, setKbH] = useState(0);
 
   useEffect(() => {
-    const show = Keyboard.addListener('keyboardDidShow', (e) => setKbH(e.endCoordinates.height));
+    const show = Keyboard.addListener('keyboardDidShow', (e) => {
+      setKbH(e.endCoordinates.height);
+      // 点在文末附近时键盘弹出会把那一段压到可视区外（光标所在的行看不见），
+      // 滚到底把光标区域带回键盘上方的视野
+      const len = Math.max(1, contentRef.current.length);
+      if (caretRef.current > len * 0.75) {
+        setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 80);
+      }
+    });
     const hide = Keyboard.addListener('keyboardDidHide', () => setKbH(0));
     return () => {
       show.remove();
@@ -156,6 +164,7 @@ export default function EditorScreen() {
       setStatus(ch.status || 'draft');
       titleRef.current = ch.title ?? '';
       contentRef.current = ch.content ?? '';
+      /* eslint-disable-next-line react-hooks/immutability -- 异步回调里复位光标 */
       caretRef.current = 0;
       setStats({ len: (ch.content ?? '').length, dirty: false });
       setError('');
@@ -331,8 +340,8 @@ export default function EditorScreen() {
     <View style={{ flex: 1, backgroundColor: C.bg }}>
       {toastNode}
       {confirmNode}
-      {/* 顶栏（固定不随正文滚动） */}
-      <View style={{ paddingTop: insets.top + 8, paddingHorizontal: SP.l, paddingBottom: 8, gap: 8 }}>
+      {/* 顶栏（固定不随正文滚动）；点空白收起键盘（v1.8.0 行为，重构时曾丢失） */}
+      <Pressable style={{ paddingTop: insets.top + 8, paddingHorizontal: SP.l, paddingBottom: 8, gap: 8 }} onPress={() => Keyboard.dismiss()}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
           <Pressable
             onPress={() => router.back()}
@@ -397,20 +406,22 @@ export default function EditorScreen() {
           </Pressable>
         </View>
         {error ? <Text style={{ color: C.seal, fontSize: 12.5, lineHeight: 18 }}>{error}</Text> : null}
-      </View>
+      </Pressable>
 
       {chapter === null ? (
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
           <ActivityIndicator color={C.gold} />
         </View>
       ) : (
-        <View style={{ flex: 1 }}>
+        <View style={{ flex: 1, paddingBottom: kbH }}>
           {/* 正文整页滚动区：EditText 撑到内容全高，不再内部滚动（滚动交给 ScrollView，
-              惯性/边缘效果与阅读页一致）；右侧覆盖式细滑杆不再挤占正文宽度 */}
+              惯性/边缘效果与阅读页一致）；右侧覆盖式细滑杆不再挤占正文宽度。
+              新版安卓 edge-to-edge 下 adjustResize 不再压缩窗口（键盘直接盖住内容），
+              键盘高度垫在本容器底部把滚动区整体抬到键盘上方，正文任何位置都不会压在键盘底下 */}
           <ScrollView
             ref={scrollRef}
             style={{ flex: 1 }}
-            contentContainerStyle={{ paddingHorizontal: 18, paddingTop: 10, paddingBottom: kbH > 0 ? kbH + 48 : 60 }}
+            contentContainerStyle={{ paddingHorizontal: 18, paddingTop: 10, paddingBottom: 60 }}
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode="on-drag"
             onScroll={(e) => {
@@ -481,9 +492,10 @@ export default function EditorScreen() {
             />
           </ScrollView>
 
-          {/* 覆盖式快速跳转滑杆：平时只是右缘一条细轨，拖动时 thumb 跟随滚动位置 */}
+          {/* 覆盖式快速跳转滑杆：平时只是右缘一条细轨，拖动时 thumb 跟随滚动位置。
+              absolute 定位相对的是 padding box，bottom:0 会伸进键盘垫高区，显式跟 kbH 抬起 */}
           <View
-            style={{ position: 'absolute', top: 0, bottom: 0, right: 0, width: 26, justifyContent: 'center' }}
+            style={{ position: 'absolute', top: 0, bottom: kbH, right: 0, width: 26, justifyContent: 'center' }}
             onLayout={(e) => setRailH(e.nativeEvent.layout.height)}
             {...sliderPan.panHandlers}
           >
@@ -505,15 +517,19 @@ export default function EditorScreen() {
             </View>
           </View>
 
-          {/* 底栏（固定）：字数/脏标记/评分 + 跳转百分比（仅拖动时显示） */}
-          <View style={{ paddingBottom: insets.bottom + 6, paddingHorizontal: SP.l, paddingVertical: 8, borderTopWidth: 1, borderTopColor: C.borderSoft, backgroundColor: C.bg, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          {/* 底栏（固定）：字数/脏标记/评分 + 跳转百分比（仅拖动时显示）；
+              键盘弹出时随容器抬到键盘上方，点空白收起键盘 */}
+          <Pressable
+            onPress={() => Keyboard.dismiss()}
+            style={{ paddingBottom: kbH > 0 ? 8 : insets.bottom + 6, paddingHorizontal: SP.l, paddingVertical: 8, borderTopWidth: 1, borderTopColor: C.borderSoft, backgroundColor: C.bg, flexDirection: 'row', alignItems: 'center', gap: 8 }}
+          >
             <Text style={{ color: C.text3, fontSize: 11.5, flex: 1 }}>
               {stats.len} 字{stats.dirty ? ' · 有未保存修改' : ''}
               {jumpPct != null ? ` · 跳至 ${jumpPct}%` : ''}
             </Text>
             {chapter.raw_output ? <Chip label="已润色" fg={C.green} bg={C.greenSoft} /> : null}
             {chapter.quality_score ? <Text style={{ color: C.gold, fontSize: 11.5 }}>评分 {chapter.quality_score}</Text> : null}
-          </View>
+          </Pressable>
         </View>
       )}
 
