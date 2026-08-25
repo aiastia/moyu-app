@@ -41,34 +41,22 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      # 发新版自动清旧版缓存：actions/cache 按 ref 隔离，每个 tag 各存一份
-      # gradle(1.6G)+ndk(2.6G)+node_modules(0.5G)≈4.7GB，且 tag 之间互相读不到
-      # （新 tag 构建必然冷编、必然重存全套），旧 tag 缓存是纯死数据——两个版本
-      # 并存就把 10GB 配额挤爆（v1.9.2+v1.9.4 曾达 11.1GB）。构建新 tag 时删掉
-      # 所有旧 tag 的缓存条目（main 分支的小缓存保留，供 ci job 复用）；
-      # 当前 tag 自己的缓存保留，同 tag 重跑仍能命中。
-      - name: Prune caches from older tags
-        if: startsWith(github.ref, 'refs/tags/v')
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh cache list --repo "$GITHUB_REPOSITORY" --json id,ref --limit 100 \
-            | jq -r --arg cur "refs/heads/$GITHUB_REF" \
-                '.[] | select(.ref | test("refs/tags/v") and . != $cur) | .id' \
-            | while read -r id; do
-                echo "delete cache $id"
-                gh cache delete "$id" --repo "$GITHUB_REPOSITORY" || true
-              done
-
       - uses: actions/setup-node@v7
         with:
           node-version: '24'
           cache: npm
 
-      # node_modules 缓存：命中则跳过 npm ci（省 1-2 分钟；lock 变了自动重装）
+      # ===== 缓存策略（2026-08-25 重构）：只存 main scope 一份，tag 只读不写 =====
+      # actions/cache 按 ref 隔离：tag 之间互相读不到（新 tag 曾各自重存全套
+      # gradle+ndk+node_modules≈4.7GB，两版并存挤爆 10GB 配额），但所有构建
+      # 都能读默认分支(main) scope 的缓存（ci job 存的 node-cache 在 tag 构建
+      # 命中过，实证）。因此：restore 一律执行（tag 发版也暖编），save 只在
+      # workflow_dispatch(从 main 触发)时执行——全仓库永远只有一份缓存代际。
+      # 发版前（或依赖升级后）跑一次手动构建即可刷新缓存。
+
       - name: Restore node_modules
         id: nmod
-        uses: actions/cache@v6
+        uses: actions/cache/restore@v6
         with:
           path: node_modules
           key: node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
@@ -90,11 +78,37 @@ jobs:
       - name: Prebuild android project
         run: npx expo prebuild -p android --no-install
 
+      # 缓存代际清理（仅手动构建时）：删旧 key 的垃圾代际 + 历史遗留的 tag scope
+      # 副本（tag 改为只读后不会再产生），保留 main scope 当前 key 的那一份。
+      # 必须在 prebuild 之后（gradle key 依赖 android/gradle/wrapper 文件）。
+      - name: Prune stale cache generations
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cur_node="node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}"
+          cur_ndk="ndk-${{ runner.os }}-${{ hashFiles('package-lock.json') }}"
+          cur_gradle="gradle-${{ runner.os }}-${{ hashFiles('android/gradle/wrapper/gradle-wrapper.properties', 'package-lock.json') }}"
+          gh cache list --repo "$GITHUB_REPOSITORY" --json id,key,ref --limit 100 \
+            | jq -r '.[] | [.id, .key, .ref] | @tsv' \
+            | while IFS=$'\t' read -r id key ref; do
+                case "$key" in
+                  node-modules-*) cur="$cur_node" ;;
+                  ndk-*) cur="$cur_ndk" ;;
+                  gradle-*) cur="$cur_gradle" ;;
+                  *) continue ;;
+                esac
+                if [ "$key" != "$cur" ] || [[ "$ref" == *refs/tags/* ]]; then
+                  echo "delete: $key ($ref)"
+                  gh cache delete "$id" --repo "$GITHUB_REPOSITORY" || true
+                fi
+              done
+
       # NDK 缓存：gradle 首次构建会下载约 1GB 的 NDK 并解压（3-5 分钟），
       # 不在 ~/.gradle 里、每次都重新来。key 绑 package-lock：expo/RN 升级
       # → ndkVersion 变 → 新 key，不会错配。
       - name: NDK cache
-        uses: actions/cache@v6
+        uses: actions/cache/restore@v6
         with:
           path: /usr/local/lib/android/sdk/ndk
           key: ndk-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
@@ -105,7 +119,7 @@ jobs:
       # ~/.gradle/caches 内含 build-cache-1，配合 org.gradle.caching=true 可
       # 跨构建复用 Kotlin/Hermes 等任务编译结果（省 2-4 分钟）。
       - name: Gradle cache
-        uses: actions/cache@v6
+        uses: actions/cache/restore@v6
         with:
           path: |
             ~/.gradle/caches
@@ -142,6 +156,35 @@ jobs:
       - name: Build release APK
         working-directory: android
         run: ./gradlew assembleRelease --stacktrace
+
+      # 缓存回写：只在手动构建（main scope）时保存——tag 构建写了也只存在
+      # 自己 tag 名下（别的构建读不到），纯占配额。key 与上面三个 restore
+      # 严格一致，未变化时 save 自动跳过。
+      - name: Save node_modules cache
+        if: github.event_name == 'workflow_dispatch'
+        continue-on-error: true
+        uses: actions/cache/save@v6
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Save NDK cache
+        if: github.event_name == 'workflow_dispatch'
+        continue-on-error: true
+        uses: actions/cache/save@v6
+        with:
+          path: /usr/local/lib/android/sdk/ndk
+          key: ndk-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Save gradle cache
+        if: github.event_name == 'workflow_dispatch'
+        continue-on-error: true
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('android/gradle/wrapper/gradle-wrapper.properties', 'package-lock.json') }}
 
       - name: Collect APK
         run: |
