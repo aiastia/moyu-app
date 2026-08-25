@@ -37,8 +37,28 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: write
     steps:
       - uses: actions/checkout@v5
+
+      # 发新版自动清旧版缓存：actions/cache 按 ref 隔离，每个 tag 各存一份
+      # gradle(1.6G)+ndk(2.6G)+node_modules(0.5G)≈4.7GB，且 tag 之间互相读不到
+      # （新 tag 构建必然冷编、必然重存全套），旧 tag 缓存是纯死数据——两个版本
+      # 并存就把 10GB 配额挤爆（v1.9.2+v1.9.4 曾达 11.1GB）。构建新 tag 时删掉
+      # 所有旧 tag 的缓存条目（main 分支的小缓存保留，供 ci job 复用）；
+      # 当前 tag 自己的缓存保留，同 tag 重跑仍能命中。
+      - name: Prune caches from older tags
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh cache list --repo "$GITHUB_REPOSITORY" --json id,ref --limit 100 \
+            | jq -r --arg cur "refs/heads/$GITHUB_REF" \
+                '.[] | select(.ref | test("refs/tags/v") and . != $cur) | .id' \
+            | while read -r id; do
+                echo "delete cache $id"
+                gh cache delete "$id" --repo "$GITHUB_REPOSITORY" || true
+              done
 
       - uses: actions/setup-node@v7
         with:
