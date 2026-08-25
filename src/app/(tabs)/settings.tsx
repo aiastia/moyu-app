@@ -105,6 +105,18 @@ export default function SettingsScreen() {
 
         <Card>
           <Text style={{ color: C.text2, fontSize: 12, fontWeight: '700' }}>创作</Text>
+          <Pressable onPress={() => router.push('/preferences')} style={{ flexDirection: 'row', alignItems: 'center', gap: 11 }}>
+            <View style={{ width: 34, height: 34, borderRadius: 11, backgroundColor: C.card2, alignItems: 'center', justifyContent: 'center' }}>
+              <Ionicons name="person-outline" size={16} color={C.gold} />
+            </View>
+            <View style={{ flex: 1, gap: 1 }}>
+              <Text style={{ color: C.text3, fontSize: 11 }}>个人偏好</Text>
+              <Text style={{ color: C.text, fontSize: 14, fontWeight: '600' }} numberOfLines={1}>
+                昵称 / 默认笔名 / 建书默认值
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={15} color={C.text3} />
+          </Pressable>
           <Pressable onPress={() => router.push('/styles')} style={{ flexDirection: 'row', alignItems: 'center', gap: 11 }}>
             <View style={{ width: 34, height: 34, borderRadius: 11, backgroundColor: C.card2, alignItems: 'center', justifyContent: 'center' }}>
               <Ionicons name="brush-outline" size={16} color={C.gold} />

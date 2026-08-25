@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
-import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -34,8 +34,9 @@ function statusStyle(status: string): { fg: string; bg: string } {
   }
 }
 
-/** memo：页面每 10s 轮询刷新列表，无变化的卡片跳过重渲（回调必须传稳定引用） */
-const TaskCard = memo(function TaskCard({ task, onOpen, onCancel, onRetry }: { task: TaskItem; onOpen: (t: TaskItem) => void; onCancel: (t: TaskItem) => void; onRetry: (t: TaskItem) => void }) {
+/** memo：页面每 10s 轮询刷新列表，无变化的卡片跳过重渲（回调必须传稳定引用）
+ *  child=子任务：缩进 + 左侧 hairline 连接线，嵌套在父任务下（一键连写轮次的归属可见化） */
+const TaskCard = memo(function TaskCard({ task, child, onOpen, onCancel, onRetry }: { task: TaskItem; child?: boolean; onOpen: (t: TaskItem) => void; onCancel: (t: TaskItem) => void; onRetry: (t: TaskItem) => void }) {
   const s = statusStyle(task.status);
   const active = task.status === 'running' || task.status === 'pending';
   return (
@@ -45,8 +46,11 @@ const TaskCard = memo(function TaskCard({ task, onOpen, onCancel, onRetry }: { t
         backgroundColor: pressed ? C.card2 : C.card,
         borderRadius: R.l,
         borderWidth: 1,
-        borderColor: C.borderSoft,
-        padding: 14,
+        borderColor: child ? 'transparent' : C.borderSoft,
+        marginLeft: child ? 18 : 0,
+        borderLeftWidth: child ? 2 : 1,
+        borderLeftColor: child ? 'rgba(229,181,88,0.35)' : C.borderSoft,
+        padding: child ? 11 : 14,
         gap: 9,
         opacity: pressed ? 0.92 : 1,
       })}
@@ -54,7 +58,8 @@ const TaskCard = memo(function TaskCard({ task, onOpen, onCancel, onRetry }: { t
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
         <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
           {active ? <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: task.status === 'running' ? C.blue : C.text3 }} /> : null}
-          <Text style={{ color: C.text, fontSize: 14, fontWeight: '700', flex: 1 }} numberOfLines={1}>
+          {child ? <Ionicons name="arrow-redo-outline" size={12} color={C.text3} /> : null}
+          <Text style={{ color: C.text, fontSize: child ? 13 : 14, fontWeight: '700', flex: 1 }} numberOfLines={1}>
             {task.title || task.task_type}
           </Text>
           <Chip label={STATUS_LABEL[task.status] ?? task.status} fg={s.fg} bg={s.bg} bold />
@@ -148,6 +153,7 @@ function TaskDetailSheet({
 
       <InfoLine label="阶段" value={task.stage} />
       <InfoLine label="状态说明" value={task.status_message} />
+      <InfoLine label="归属" value={task.parent_task_id ? `任务 #${task.parent_task_id} 的子任务` : undefined} />
       {task.error ? (
         <View style={{ backgroundColor: C.sealSoft, borderRadius: 10, padding: 11, gap: 4 }}>
           <Text style={{ color: C.seal, fontSize: 11, fontWeight: '700' }}>错误信息</Text>
@@ -248,6 +254,27 @@ export default function TasksScreen() {
       };
     }, [load]),
   );
+
+  /** 按 parent_task_id 分组成展示行：子任务紧跟父任务之后缩进渲染
+   *  （一键连写等编排任务的轮次子任务归属可见化）。父行不在当前列表
+   *  （被清理/状态筛选滤掉）时子行回落为根级平铺，不丢行——与网页端一致。 */
+  const rows = useMemo(() => {
+    const list = tasks ?? [];
+    const byId = new Map(list.map((t) => [t.id, t]));
+    const childrenOf = new Map<number, TaskItem[]>();
+    for (const t of list) {
+      if (t.parent_task_id && byId.has(t.parent_task_id)) {
+        childrenOf.set(t.parent_task_id, [...(childrenOf.get(t.parent_task_id) ?? []), t]);
+      }
+    }
+    const out: { task: TaskItem; child: boolean }[] = [];
+    for (const t of list) {
+      if (t.parent_task_id && byId.has(t.parent_task_id)) continue;
+      out.push({ task: t, child: false });
+      for (const c of childrenOf.get(t.id) ?? []) out.push({ task: c, child: true });
+    }
+    return out;
+  }, [tasks]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -382,9 +409,9 @@ export default function TasksScreen() {
           <EmptyState icon="cloud-offline-outline" title="任务加载失败" sub={error} />
         ) : (
           <FlatList
-            data={tasks ?? []}
-            keyExtractor={(t) => String(t.id)}
-            renderItem={({ item }) => <TaskCard task={item} onOpen={setDetailTask} onCancel={doCancel} onRetry={doRetry} />}
+            data={rows}
+            keyExtractor={(r) => String(r.task.id)}
+            renderItem={({ item }) => <TaskCard task={item.task} child={item.child} onOpen={setDetailTask} onCancel={doCancel} onRetry={doRetry} />}
             contentContainerStyle={{ flexGrow: tasks?.length ? 0 : 1, justifyContent: tasks?.length ? undefined : 'center', gap: 12, paddingBottom: 28 }}
             refreshControl={<RefreshControl refreshing={refreshing} tintColor={C.gold} colors={[C.gold]} onRefresh={onRefresh} />}
             ListEmptyComponent={<EmptyState icon="flash-outline" title="暂无任务" sub="在网页端发起章节生成、润色等操作后，可以在这里盯进度" />}

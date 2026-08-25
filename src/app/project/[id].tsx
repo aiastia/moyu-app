@@ -12,6 +12,7 @@ import { BlueprintPanel } from '@/components/BlueprintPanel';
 import { AutoWriteSheet } from '@/components/AutoWriteSheet';
 import { CoverSheet } from '@/components/CoverSheet';
 import { CoverArt } from '@/components/CoverArt';
+import { PendingEntitiesCard } from '@/components/PendingEntitiesCard';
 import type { ChapterRow, OutlineItem, ProjectDetail, WritingStyleItem } from '@/lib/api';
 import { ApiError } from '@/lib/api';
 import { friendlyError, loadLastRead, useAuth } from '@/lib/auth';
@@ -721,6 +722,7 @@ export default function ProjectScreen() {
                       ) : null}
                     </Pressable>
                   ))}
+                  <PendingEntitiesCard projectId={projectId} />
                 </View>
               )
             ) : null}

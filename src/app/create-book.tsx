@@ -1,15 +1,16 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { FieldLabel, Input, ScreenHeader, useConfirm, useToast } from '@/components/ui';
 import { friendlyError, useAuth } from '@/lib/auth';
+import { NARRATIVE_POV_OPTIONS } from '@/lib/platforms';
 import { C, R, SP } from '@/lib/theme';
 
 const GENRES = ['玄幻', '仙侠', '都市', '言情', '科幻', '悬疑', '历史', '游戏', '奇幻', '武侠'];
-const POVS = ['第三人称', '第一人称'];
+const POVS = NARRATIVE_POV_OPTIONS;
 const KINDS = [
   { key: 'long', label: '长篇连载' },
   { key: 'short', label: '短篇单章' },
@@ -55,6 +56,21 @@ export default function CreateBookScreen() {
   const [busy, setBusy] = useState(false);
   const [toast, toastNode] = useToast();
   const [confirm, confirmNode] = useConfirm();
+
+  // 个人偏好预填（默认笔名/人称/目标字数）：向导里显式改过的以向导为准，
+  // 与服务端 apply_user_book_defaults 的"显式传入 > 用户偏好"回退链一致
+  useEffect(() => {
+    if (!api) return;
+    api
+      .getUserPreferences()
+      .then((p) => {
+        if (p.default_pen_name) setPenName(p.default_pen_name);
+        if (p.new_book_defaults?.narrative_pov) setPov(p.new_book_defaults.narrative_pov);
+        const wan = Math.round((p.new_book_defaults?.target_word_count || 0) / 10000);
+        if (wan > 0) setTargetWan(String(wan));
+      })
+      .catch(() => undefined);
+  }, [api]);
 
   const submit = async () => {
     if (!api || busy) return;

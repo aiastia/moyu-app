@@ -6,12 +6,23 @@ import type { Book } from '@/lib/api';
 import { fmtPercent, fmtRelative, fmtWords, STORY_KIND_LABEL } from '@/lib/format';
 import { C, R } from '@/lib/theme';
 
-export function BookCard({ book, onPress }: { book: Book; onPress: () => void }) {
+export function BookCard({
+  book,
+  onPress,
+  onLongPress,
+}: {
+  book: Book;
+  onPress: () => void;
+  onLongPress?: () => void;
+}) {
   const pct = fmtPercent(book.current_word_count, book.target_word_count);
   const kind = STORY_KIND_LABEL[book.story_kind] ?? '作品';
+  const subCount = book.submissions?.count ?? 0;
   return (
     <Pressable
       onPress={onPress}
+      onLongPress={onLongPress}
+      delayLongPress={350}
       style={({ pressed }) => ({
         flexDirection: 'row',
         gap: 14,
@@ -28,9 +39,11 @@ export function BookCard({ book, onPress }: { book: Book; onPress: () => void })
         <Text style={{ color: C.text, fontSize: 17, fontWeight: '700' }} numberOfLines={1}>
           {book.title}
         </Text>
-        <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
+        <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
           {book.tag ? <Chip label={book.tag} fg={C.gold} bg={C.goldSoft} bold /> : null}
           <Chip label={kind} fg={book.story_kind === 'short' ? C.purple : C.blue} bg={book.story_kind === 'short' ? C.purpleSoft : C.blueSoft} />
+          {book.outline_mode === 'one_to_many' ? <Chip label="细化模式" fg={C.green} bg={C.greenSoft} /> : null}
+          {subCount > 0 ? <Chip label={`已投 ${subCount}`} fg={C.gold} bg={C.goldSoft} /> : null}
           {book.status === 'archived' ? <Chip label="已归档" fg={C.text3} bg={C.card2} /> : null}
         </View>
         {book.desc ? (
@@ -44,7 +57,12 @@ export function BookCard({ book, onPress }: { book: Book; onPress: () => void })
         </Text>
         <ProgressBar pct={pct} />
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Text style={{ color: C.text3, fontSize: 11 }}>{book.updated ? `更新于 ${fmtRelative(book.updated)}` : ''}</Text>
+          <Text style={{ color: C.text3, fontSize: 11 }} numberOfLines={1}>
+            {subCount > 0 && book.submissions?.platforms?.length
+              ? `已投 ${book.submissions.platforms.join('、')} · `
+              : ''}
+            {book.updated ? `更新于 ${fmtRelative(book.updated)}` : ''}
+          </Text>
           <Text style={{ color: C.gold, fontSize: 11, fontWeight: '700' }}>{pct}%</Text>
         </View>
       </View>

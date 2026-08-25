@@ -11,10 +11,14 @@ export interface Book {
   current_word_count: number;
   updated?: string | null;
   tag?: string | null;
+  /** 后端与 tag 同值的类型原文（tag 是兜底"其他"后的值，搜索用 genre 原文） */
+  genre?: string | null;
   status?: string | null;
   type?: string | null;
   story_kind: 'long' | 'short' | string;
   outline_mode?: string;
+  /** 投稿摘要（服务端 settings.submissions 的紧凑投影：计数 + 去重平台名，最多 5 个） */
+  submissions?: { count: number; platforms: string[] } | null;
 }
 
 export interface ProjectDetail {
@@ -135,6 +139,8 @@ export interface TaskItem {
   task_type: string;
   title: string;
   status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'cancelling' | string;
+  /** 父任务 id（一键连写等编排任务派生的子任务；NULL=独立任务）。父行不在列表时子行回落平铺渲染 */
+  parent_task_id?: number | null;
   progress: number;
   status_message?: string | null;
   cancel_requested?: boolean;
@@ -153,6 +159,45 @@ export interface LoginUser {
   username: string;
   nickname?: string | null;
   is_admin?: boolean;
+}
+
+/** 待补充实体候选：大纲/章节计划里出现但尚未入库的实体（value 结构见 pending_entity_service） */
+export interface PendingEntityItem {
+  name: string;
+  description?: string;
+  /** 首次出现的章节号 */
+  from_chapter?: number;
+  [k: string]: unknown;
+}
+
+export interface PendingEntitiesRes {
+  pending_items: PendingEntityItem[];
+  pending_locations: PendingEntityItem[];
+  pending_characters: PendingEntityItem[];
+  pending_organizations: PendingEntityItem[];
+  total: number;
+  ignored_items: PendingEntityItem[];
+  ignored_locations: PendingEntityItem[];
+  ignored_characters: PendingEntityItem[];
+  ignored_organizations: PendingEntityItem[];
+  ignored_total: number;
+}
+
+/** 投稿记录行：platform 必填，date 形如 2026-08-25（可空），note 备注（可空） */
+export interface SubmissionRow {
+  platform: string;
+  date?: string;
+  note?: string;
+}
+
+/** 个人偏好（GET/PUT /api/user/preferences）：昵称走用户列，其余存 user.settings */
+export interface UserPreferences {
+  nickname: string;
+  default_pen_name: string;
+  new_book_defaults: {
+    narrative_pov: string;
+    target_word_count: number;
+  };
 }
 
 export interface WorldItem {
@@ -566,6 +611,57 @@ export class Api {
     return this.req<{ ok: boolean }>(`/api/projects/${id}`, {
       method: 'PUT',
       body: JSON.stringify(body),
+    });
+  }
+
+  // ===== 投稿记录（书架筛选与投稿管理用；一条 = 一个平台一次投稿） =====
+  getSubmissions(projectId: number) {
+    return this.req<{ submissions: SubmissionRow[] }>(`/api/projects/${projectId}/submissions`);
+  }
+
+  putSubmissions(projectId: number, submissions: SubmissionRow[]) {
+    return this.req<{ ok: boolean; count: number }>(`/api/projects/${projectId}/submissions`, {
+      method: 'PUT',
+      body: JSON.stringify({ submissions }),
+    });
+  }
+
+  // ===== 个人偏好（用户级，对所有项目生效） =====
+  getUserPreferences() {
+    return this.req<UserPreferences>('/api/user/preferences');
+  }
+
+  putUserPreferences(body: UserPreferences) {
+    return this.req<UserPreferences>('/api/user/preferences', {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    });
+  }
+
+  // ===== 待补充实体（大纲里出现但尚未入库的实体；忽略后生成任务同步跳过） =====
+  getPendingEntities(projectId: number) {
+    return this.req<PendingEntitiesRes>(`/api/projects/${projectId}/outlines/pending-entities`);
+  }
+
+  ignorePendingEntities(projectId: number, entityType: string, names: string[]) {
+    return this.req<{ entity_type: string; ignored: string[] }>(`/api/projects/${projectId}/outlines/pending-entities/ignore`, {
+      method: 'POST',
+      body: JSON.stringify({ entity_type: entityType, names }),
+    });
+  }
+
+  unignorePendingEntities(projectId: number, entityType: string, names: string[]) {
+    return this.req<{ entity_type: string; ignored: string[] }>(`/api/projects/${projectId}/outlines/pending-entities/unignore`, {
+      method: 'POST',
+      body: JSON.stringify({ entity_type: entityType, names }),
+    });
+  }
+
+  /** 按类型提交待补充实体生成任务（异步，进度看任务页）；entityType: items/locations/characters/organizations */
+  generatePendingEntities(projectId: number, entityType: string) {
+    return this.req<{ task_id: number }>(`/api/projects/${projectId}/outlines/generate-pending-${entityType}`, {
+      method: 'POST',
+      body: JSON.stringify({}),
     });
   }
 

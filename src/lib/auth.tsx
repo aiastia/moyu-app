@@ -22,6 +22,8 @@ interface AuthContextValue extends AuthState {
   login: (rawUrl: string, username: string, password: string, remember?: boolean) => Promise<void>;
   /** keepConfig=true（默认）：只清 token，保留服务器地址/账号/记住的密码——用于 401 过期等场景；显式退出登录用 keepConfig=false 全清 */
   logout: (opts?: { keepConfig?: boolean }) => Promise<void>;
+  /** 本地更新当前用户信息（如个人偏好页改昵称后即时同步顶栏显示，并持久化） */
+  updateUser: (patch: Partial<LoginUser>) => void;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -67,14 +69,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setState((s) => (keepConfig ? { ...s, token: null } : { ...s, baseUrl: null, token: null, user: null }));
   }, []);
 
+  const updateUser = useCallback((patch: Partial<LoginUser>) => {
+    setState((s) => {
+      if (!s.user) return s;
+      const user = { ...s.user, ...patch };
+      AsyncStorage.setItem(KEY_USER, JSON.stringify(user)).catch(() => undefined);
+      return { ...s, user };
+    });
+  }, []);
+
   const api = useMemo(
     () => (state.baseUrl && state.token ? new Api(state.baseUrl, state.token) : null),
     [state.baseUrl, state.token],
   );
 
   const value = useMemo<AuthContextValue>(
-    () => ({ ...state, api, login, logout }),
-    [state, api, login, logout],
+    () => ({ ...state, api, login, logout, updateUser }),
+    [state, api, login, logout, updateUser],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
