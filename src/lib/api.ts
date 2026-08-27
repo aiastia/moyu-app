@@ -1,5 +1,7 @@
 /** 墨鱼写作系统 REST API 客户端（对接自部署服务端） */
 
+import { postSSE, type PostSSEOptions } from './sse';
+
 export interface Book {
   id: number;
   title: string;
@@ -131,6 +133,8 @@ export interface CharacterItem {
   organization_id?: number | null;
   reference_image?: string | null;
   reference_prompt?: string | null;
+  /** 别名/称呼列表（与 name 一起在正文里召回该角色）；NULL=未设置 */
+  aliases?: string[] | null;
 }
 
 export interface TaskItem {
@@ -139,6 +143,8 @@ export interface TaskItem {
   task_type: string;
   title: string;
   status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'cancelling' | string;
+  /** 任务类型的结构化进度（chat_read_review 通读审稿用：review/findings/phase/last_completed_chapter） */
+  progress_details?: Record<string, unknown> | null;
   /** 父任务 id（一键连写等编排任务派生的子任务；NULL=独立任务）。父行不在列表时子行回落平铺渲染 */
   parent_task_id?: number | null;
   progress: number;
@@ -258,6 +264,8 @@ export interface CharacterBody {
   main_career_stage_desc?: string;
   sub_careers?: unknown[];
   organization_id?: number | null;
+  /** 别名/称呼列表（正文召回时与姓名一起匹配） */
+  aliases?: string[];
 }
 
 export interface ForeshadowBody {
@@ -522,6 +530,226 @@ export const CHARACTER_STATUS_LABEL: Record<string, string> = {
   dead: '死亡',
   missing: '失踪',
   unknown: '未知',
+};
+
+// ===== AI 聊天助手（aichat） =====
+
+/** 聊天会话（列表项带 busy=后台有一轮在跑） */
+export interface ChatSession {
+  id: number;
+  user_id: number;
+  project_id: number;
+  title: string;
+  enabled_skills: string[];
+  /** 会话级模型覆盖（空=按 chat→generation→默认 档走） */
+  model_override: string;
+  created_at?: string | null;
+  updated_at?: string | null;
+  busy?: boolean;
+}
+
+/** 工具调用事件条目：带 tool 键=调用（args 可序列化摘要），带 tool_result 键=结果（耗时+摘要） */
+export interface ChatToolEvent {
+  tool?: string;
+  args?: unknown;
+  tool_result?: string;
+  ms?: number;
+  brief?: string;
+  [k: string]: unknown;
+}
+
+export interface ChatMessage {
+  id: number;
+  session_id: number;
+  role: 'user' | 'assistant' | string;
+  content: string;
+  tool_events: ChatToolEvent[];
+  /** 扩展元数据：{task_id, report: true, interrupted} 标记通读审稿报告消息 */
+  meta: Record<string, unknown>;
+  created_at?: string | null;
+}
+
+export interface ChatBuiltinSkill {
+  name: string;
+  display_name: string;
+  prompt?: string;
+}
+
+/** 通读审稿预览估算（AI 工具与 REST 共用，不创建任务） */
+export interface ReadReviewPreview {
+  book_title: string;
+  range: string;
+  chapter_count: number;
+  total_words: number;
+  /** 分批模式的中文展示名（自动/全部一次/每N章） */
+  batch_mode: string;
+  batch_count: number;
+  batch_sizes: number[];
+  est_minutes: number;
+  fits: boolean;
+  est_total_tokens: number;
+  usable_input_tokens: number;
+  context_window: number;
+  /** 不 fits 时的原因说明 */
+  message: string;
+}
+
+/** 审稿发现（问题清单条目）。status: pending/applied/stale/dismissed */
+export interface ChatReviewFinding {
+  id: number;
+  session_id: number;
+  project_id: number;
+  task_id?: number | null;
+  batch_index?: number | null;
+  chapter_id?: number | null;
+  chapter_number?: number | null;
+  scope: 'chapter' | 'cross_chapter' | 'book' | string;
+  related_chapters?: { chapter_id?: number; number?: number }[];
+  finding_type: 'typo' | 'consistency' | 'setting' | 'timeline' | 'repetition' | 'other' | string;
+  severity: 'high' | 'medium' | 'low' | string;
+  quote: string;
+  suggestion: string;
+  replacement: string;
+  has_draft: boolean;
+  has_patch: boolean;
+  patch_quote?: string;
+  patch_replacement?: string;
+  source_content_hash?: string;
+  status: string;
+  revision_id?: number | null;
+  created_at?: string | null;
+}
+
+/** 修改稿查看响应：草稿全文 + 当前正文（对照展示）；发现自己无稿时回落同章属主的稿 */
+export interface FindingDraftRes {
+  finding_id: number;
+  chapter_number?: number | null;
+  draft_content: string;
+  chapter_content: string;
+  is_chapter_level: boolean;
+}
+
+/** 批量应用结果：分 applied/stale/failed/skipped 四组 */
+export interface ApplyFindingsRes {
+  applied: number[];
+  stale: { id: number; chapter?: number | null; reason?: string }[];
+  failed: { id: number; reason?: string }[];
+  skipped_no_chapter: number[];
+}
+
+/** 章节正文版本账本（列表不含正文；详情含 old/new_content 对照） */
+export interface ChatRevision {
+  id: number;
+  session_id?: number | null;
+  project_id: number;
+  chapter_id: number;
+  chapter_number?: number | null;
+  parent_revision_id?: number | null;
+  base_content_hash?: string;
+  /** finding_apply / direct_edit / mcp_direct / rollback */
+  source: string;
+  finding_ids: number[];
+  summary: string;
+  created_at?: string | null;
+  old_content?: string;
+  new_content?: string;
+}
+
+/** 用户技能清单（GET /api/skills，含系统技能；聊天技能选择只用 custom+启用项） */
+export interface UserSkillItem {
+  id: number;
+  name: string;
+  display_name?: string | null;
+  description?: string | null;
+  category?: string | null;
+  skill_type: 'custom' | string;
+  is_enabled: boolean;
+  is_mine?: boolean;
+  share_status?: string;
+  as_tool?: boolean;
+  [k: string]: unknown;
+}
+
+/** 技能广场条目（脱敏：preview 只有前 200 字） */
+export interface SkillMarketItem {
+  id: number;
+  display_name: string;
+  description: string;
+  category: string;
+  author: string;
+  is_mine: boolean;
+  share_status: string;
+  preview: string;
+  prompt_chars: number;
+  shared_at?: string | null;
+}
+
+/** AI 模型配置（model_override 下拉用：name 配置名 + 各场景模型名） */
+export interface AiModelConfig {
+  id: number;
+  name: string;
+  model: string;
+  is_default: boolean;
+  chat_model?: string | null;
+  generation_model?: string | null;
+  [k: string]: unknown;
+}
+
+/** 角色关系（含 AI 分析的置信度/证据/来源） */
+export interface CharacterRelation {
+  id: number;
+  project_id: number;
+  from_character_id: number;
+  to_character_id: number;
+  from_name?: string | null;
+  to_name?: string | null;
+  relation_type: string;
+  category?: string | null;
+  intimacy?: number | null;
+  strength?: number | null;
+  status?: string | null;
+  description?: string | null;
+  /** 判断置信度 0-1（AI 推断的关系偏低） */
+  confidence?: number | null;
+  /** 证据列表：[{chapter_id, type:"text"|"profile", snippet?, source?}] */
+  evidence?: { chapter_id?: number; type?: string; snippet?: string; source?: string }[] | null;
+  last_updated_chapter?: number | null;
+  source?: string | null;
+}
+
+export const FINDING_STATUS_LABEL: Record<string, string> = {
+  pending: '待处理',
+  applied: '已应用',
+  stale: '已过期',
+  dismissed: '已忽略',
+};
+
+export const FINDING_TYPE_LABEL: Record<string, string> = {
+  typo: '错别字',
+  consistency: '前后矛盾',
+  setting: '设定冲突',
+  timeline: '时间线',
+  repetition: '重复',
+  other: '其他',
+};
+
+export const FINDING_SEVERITY_LABEL: Record<string, string> = {
+  high: '严重',
+  medium: '中等',
+  low: '轻微',
+};
+
+export const REVISION_SOURCE_LABEL: Record<string, string> = {
+  finding_apply: '发现应用',
+  direct_edit: 'AI 直改',
+  mcp_direct: 'MCP 直改',
+  rollback: '撤销回滚',
+};
+
+/** 任务类型 → 展示文案（详情弹窗的类型徽标） */
+export const TASK_TYPE_LABEL: Record<string, string> = {
+  chat_read_review: '通读审稿',
+  new_char_relations: '角色关系分析',
 };
 
 export class ApiError extends Error {
@@ -1315,6 +1543,243 @@ export class Api {
 
   portraitUrl(characterId: number) {
     return `${this.baseUrl}/api/portraits/${characterId}/image`;
+  }
+
+  // ===== AI 聊天助手：会话 / 消息 =====
+  listChatSessions(projectId: number) {
+    return this.req<ChatSession[]>(`/api/projects/${projectId}/chat/sessions`);
+  }
+
+  createChatSession(projectId: number, title = '') {
+    return this.req<ChatSession>(`/api/projects/${projectId}/chat/sessions`, {
+      method: 'POST',
+      body: JSON.stringify({ title }),
+    });
+  }
+
+  /** 会话设置：title/enabled_skills/model_override 均可部分更新 */
+  updateChatSession(projectId: number, sessionId: number, body: { title?: string; enabled_skills?: string[]; model_override?: string }) {
+    return this.req<ChatSession>(`/api/projects/${projectId}/chat/sessions/${sessionId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    });
+  }
+
+  deleteChatSession(projectId: number, sessionId: number) {
+    return this.req<{ ok: boolean }>(`/api/projects/${projectId}/chat/sessions/${sessionId}`, { method: 'DELETE' });
+  }
+
+  /** 消息列表（after_id 增量拉取；服务端上限 200 条/次） */
+  getChatMessages(projectId: number, sessionId: number, afterId = 0) {
+    return this.req<ChatMessage[]>(`/api/projects/${projectId}/chat/sessions/${sessionId}/messages?after_id=${afterId}`);
+  }
+
+  /** 删除指定消息及其后全部消息（截断重发：被删内容不再进入后续上下文） */
+  deleteChatMessageFrom(projectId: number, sessionId: number, messageId: number) {
+    return this.req<{ ok: boolean; removed: number }>(`/api/projects/${projectId}/chat/sessions/${sessionId}/messages/${messageId}`, { method: 'DELETE' });
+  }
+
+  getChatBuiltinSkills(projectId: number) {
+    return this.req<ChatBuiltinSkill[]>(`/api/projects/${projectId}/chat/builtin-skills`);
+  }
+
+  /** 发送消息（SSE 流式）。会话忙抛 ApiError(409)，由调用方转 liveAttachSSE 续接 */
+  sendChatMessageSSE(
+    projectId: number,
+    sessionId: number,
+    content: string,
+    onEvent?: PostSSEOptions['onEvent'],
+    signal?: AbortSignal,
+  ) {
+    return postSSE(this.baseUrl, this.token, `/api/projects/${projectId}/chat/sessions/${sessionId}/messages`, { content }, { onEvent, signal });
+  }
+
+  /** 重连正在跑的一轮（刷新/断线后续接工具活动直播）；空闲立即 done {idle:true} */
+  liveAttachSSE(projectId: number, sessionId: number, onEvent?: PostSSEOptions['onEvent'], signal?: AbortSignal) {
+    return postSSE(this.baseUrl, this.token, `/api/projects/${projectId}/chat/sessions/${sessionId}/live`, {}, { onEvent, signal });
+  }
+
+  // ===== 通读审稿（预览-确认制；任务进度走任务体系） =====
+  previewReadReview(projectId: number, body: { start_chapter?: number; end_chapter?: number; batch_mode?: string }) {
+    return this.req<ReadReviewPreview>(`/api/projects/${projectId}/chat/read-review/preview`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
+  /** 启动通读审稿任务（resume_task_id=从被取消/失败任务断点续跑） */
+  startReadReview(
+    projectId: number,
+    body: { session_id: number; start_chapter?: number; end_chapter?: number; focus?: string; batch_mode?: string; resume_task_id?: number },
+  ) {
+    return this.req<{ task_id: number; preview: ReadReviewPreview }>(`/api/projects/${projectId}/chat/read-review`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
+  // ===== 审稿发现清单 =====
+  listChatFindings(projectId: number, sessionId: number, status = '') {
+    const q = status ? `?status=${encodeURIComponent(status)}` : '';
+    return this.req<ChatReviewFinding[]>(`/api/projects/${projectId}/chat/sessions/${sessionId}/findings${q}`);
+  }
+
+  /** 改发现状态（pending/stale/dismissed；applied 不能改，撤销走版本账本） */
+  setChatFindingStatus(projectId: number, findingId: number, status: string) {
+    return this.req<ChatReviewFinding>(`/api/projects/${projectId}/chat/findings/${findingId}/status`, {
+      method: 'POST',
+      body: JSON.stringify({ status }),
+    });
+  }
+
+  /** 查看修改稿：草稿全文 + 当前正文（发现自己无稿时返回同章属主的稿） */
+  getChatFindingDraft(projectId: number, findingId: number) {
+    return this.req<FindingDraftRes>(`/api/projects/${projectId}/chat/findings/${findingId}/draft`);
+  }
+
+  /** 保存人工编辑后的修改稿（≥50 字；以当前正文刷新 hash，随后应用不被误判过期） */
+  saveChatFindingDraft(projectId: number, findingId: number, draftContent: string) {
+    return this.req<{ ok: boolean; chars: number }>(`/api/projects/${projectId}/chat/findings/${findingId}/draft`, {
+      method: 'PUT',
+      body: JSON.stringify({ draft_content: draftContent }),
+    });
+  }
+
+  /** 清空本会话全部待处理发现（整批丢弃） */
+  clearPendingChatFindings(projectId: number, sessionId: number) {
+    return this.req<{ ok: boolean; removed: number }>(`/api/projects/${projectId}/chat/findings/pending?session_id=${sessionId}`, { method: 'DELETE' });
+  }
+
+  /** 批量应用发现（按章分组，含 stale 过期保护与同章修改稿兜底） */
+  applyChatFindings(projectId: number, sessionId: number, ids: number[]) {
+    return this.req<ApplyFindingsRes>(`/api/projects/${projectId}/chat/findings/apply`, {
+      method: 'POST',
+      body: JSON.stringify({ session_id: sessionId, ids }),
+    });
+  }
+
+  /** 为单条发现生成局部修改补丁（SSE，最小 diff 精确替换） */
+  findingPatchSSE(projectId: number, findingId: number, onEvent?: PostSSEOptions['onEvent']) {
+    return postSSE(this.baseUrl, this.token, `/api/projects/${projectId}/chat/findings/${findingId}/patch`, {}, { onEvent });
+  }
+
+  /** 为单条发现生成整章修改稿（SSE；force=覆盖已有稿重新生成） */
+  findingDraftSSE(projectId: number, findingId: number, force = false, onEvent?: PostSSEOptions['onEvent']) {
+    return postSSE(this.baseUrl, this.token, `/api/projects/${projectId}/chat/findings/${findingId}/draft`, { force }, { onEvent });
+  }
+
+  // ===== 版本账本 =====
+  listChatRevisions(projectId: number, opts?: { sessionId?: number; chapterNumber?: number; limit?: number }) {
+    const q = new URLSearchParams();
+    if (opts?.sessionId) q.set('session_id', String(opts.sessionId));
+    if (opts?.chapterNumber) q.set('chapter_number', String(opts.chapterNumber));
+    q.set('limit', String(opts?.limit ?? 100));
+    return this.req<ChatRevision[]>(`/api/projects/${projectId}/chat/revisions?${q.toString()}`);
+  }
+
+  /** 修订详情（含 old_content/new_content 对照） */
+  getChatRevision(projectId: number, revisionId: number) {
+    return this.req<ChatRevision>(`/api/projects/${projectId}/chat/revisions/${revisionId}`);
+  }
+
+  /** 撤销修订：把正文恢复为该修订的 old_content（写反向记录，撤错可再撤销回来） */
+  revertChatRevision(projectId: number, revisionId: number, sessionId?: number) {
+    return this.req<{ ok?: boolean; revision_id?: number; [k: string]: unknown }>(`/api/projects/${projectId}/chat/revisions/${revisionId}/revert`, {
+      method: 'POST',
+      body: JSON.stringify({ session_id: sessionId ?? 0 }),
+    });
+  }
+
+  // ===== 技能（用户技能清单 + 共享广场；管理员审核走网页端） =====
+  getUserSkills() {
+    return this.req<UserSkillItem[]>('/api/skills');
+  }
+
+  listSkillMarket(search = '') {
+    const q = search ? `?search=${encodeURIComponent(search)}` : '';
+    return this.req<SkillMarketItem[]>(`/api/skills/market${q}`);
+  }
+
+  /** 申请共享（action=request）/ 撤回（action=withdraw，回落 private） */
+  skillShareAction(skillId: number, action: 'request' | 'withdraw') {
+    return this.req<{ ok: boolean; share_status: string }>(`/api/skills/market/${skillId}/share-request`, {
+      method: 'POST',
+      body: JSON.stringify({ action }),
+    });
+  }
+
+  /** 一键导入广场技能副本到名下（与原作者后续更新解耦） */
+  importSkillMarket(skillId: number) {
+    return this.req<{ ok: boolean; id: number; name: string }>(`/api/skills/market/${skillId}/import`, { method: 'POST' });
+  }
+
+  // ===== 项目级附加规则 / 自动关系 =====
+  getExtraWritingRules(projectId: number) {
+    return this.req<{ extra_writing_rules: string }>(`/api/projects/${projectId}/extra-writing-rules`);
+  }
+
+  updateExtraWritingRules(projectId: number, extraWritingRules: string) {
+    return this.req<{ ok: boolean }>(`/api/projects/${projectId}/extra-writing-rules`, {
+      method: 'PUT',
+      body: JSON.stringify({ extra_writing_rules: extraWritingRules }),
+    });
+  }
+
+  getAutoRelation(projectId: number) {
+    return this.req<{ auto_relation_on_create: boolean }>(`/api/projects/${projectId}/auto-relation`);
+  }
+
+  updateAutoRelation(projectId: number, on: boolean) {
+    return this.req<{ ok: boolean }>(`/api/projects/${projectId}/auto-relation`, {
+      method: 'PUT',
+      body: JSON.stringify({ auto_relation_on_create: on }),
+    });
+  }
+
+  /** 把内置预设恢复为代码内置定义（预设被改乱时的回滚口） */
+  restoreWritingStylePreset(styleId: number) {
+    return this.req<{ ok: boolean; name: string }>(`/api/writing-styles/${styleId}/restore-preset`, { method: 'POST' });
+  }
+
+  /** AI 模型配置列表（聊天会话 model_override 下拉用） */
+  getAiModels() {
+    return this.req<AiModelConfig[]>('/api/ai-models');
+  }
+
+  // ===== 角色关系 =====
+  listRelations(projectId: number) {
+    return this.req<CharacterRelation[]>(`/api/projects/${projectId}/relations`);
+  }
+
+  // ===== 封面上传 =====
+  /** 上传本地封面（multipart ≤15MB）。走 XMLHttpRequest：RN 的 XHR 原生支持
+   *  FormData 的 {uri,name,type} 文件部件，不受 expo/fetch 全局覆盖的 FormData 实现差异影响。 */
+  uploadCover(projectId: number, file: { uri: string; name: string; type: string }) {
+    return new Promise<{ ok: boolean; cover_url: string; size: string }>((resolve, reject) => {
+      const fd = new FormData();
+      fd.append('file', { uri: file.uri, name: file.name, type: file.type } as unknown as Blob);
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', `${this.baseUrl}/api/projects/${projectId}/cover/upload`);
+      xhr.setRequestHeader('Authorization', `Bearer ${this.token}`);
+      // Content-Type 由 XHR 自动带 multipart boundary，手动设置反而会坏
+      xhr.timeout = 60_000;
+      xhr.onload = () => {
+        let j: { ok?: boolean; cover_url?: string; size?: string; detail?: string } | null = null;
+        try {
+          j = JSON.parse(xhr.responseText);
+        } catch {
+          j = null;
+        }
+        if (xhr.status >= 200 && xhr.status < 300 && j?.cover_url) {
+          resolve({ ok: true, cover_url: j.cover_url, size: j.size ?? '' });
+        } else {
+          reject(new ApiError(xhr.status, j?.detail || `上传失败（${xhr.status}）`));
+        }
+      };
+      xhr.onerror = () => reject(new ApiError(0, '网络错误，上传失败'));
+      xhr.ontimeout = () => reject(new ApiError(0, '上传超时，请重试'));
+      xhr.send(fd);
+    });
   }
 
   coverUrl(projectId: number) {

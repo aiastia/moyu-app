@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
-import React, { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Animated, Keyboard, Modal, Pressable, ScrollView, Text, TextInput, View, useWindowDimensions, type DimensionValue, type ViewStyle } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { C, R } from '@/lib/theme';
 
@@ -189,9 +190,10 @@ export function EmptyState({ icon = 'library-outline', title, sub }: { icon?: ke
   );
 }
 
-/** 加载骨架（呼吸脉冲） */
+/** 加载骨架（呼吸脉冲）。Animated.Value 用 useMemo 创建：ref.current 读取会触发
+ *  react-hooks/refs（渲染期读 ref），useMemo 与 useRef 这里的语义等价且规则干净 */
 export function Skeleton({ count = 3, height = 116, style }: { count?: number; height?: number; style?: ViewStyle }) {
-  const opacity = useRef(new Animated.Value(0.45)).current;
+  const opacity = useMemo(() => new Animated.Value(0.45), []);
   useEffect(() => {
     const loop = Animated.loop(Animated.sequence([
       Animated.timing(opacity, { toValue: 1, duration: 750, useNativeDriver: false }),
@@ -616,6 +618,7 @@ export function MultiSelectField({
  *     表现为"弹窗默认滚到最底下"，必须每次打开显式回顶。 */
 export function SheetModal({ visible, onClose, title, children }: { visible: boolean; onClose: () => void; title: string; children: React.ReactNode }) {
   const { height: winH } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const scrollRef = useRef<ScrollView>(null);
   const [contentH, setContentH] = useState(0);
   /** 键盘高度：edge-to-edge 下 Modal 也不会被系统压缩（键盘直接盖住面板底部的输入框），
@@ -655,7 +658,8 @@ export function SheetModal({ visible, onClose, title, children }: { visible: boo
             borderTopRightRadius: 24,
             paddingHorizontal: 20,
             paddingTop: 10,
-            paddingBottom: 36,
+            // 垫底部安全区：面板贴屏幕底但按钮不能伸进三键导航栏的拦截区
+            paddingBottom: 36 + insets.bottom,
             maxHeight: Math.max(240, Math.round(winH * 0.88) - kbH),
             borderWidth: 1,
             borderColor: '#262C3F',

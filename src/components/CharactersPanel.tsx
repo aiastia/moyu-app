@@ -1,11 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 
-import { Chip, EmptyState, FieldLabel, Input, SelectField, SheetModal, Skeleton, useConfirm, useToast } from '@/components/ui';
+import { Chip, EmptyState, FieldLabel, Input, MultiSelectField, SelectField, SheetModal, Skeleton, useConfirm, useToast } from '@/components/ui';
 import { PortraitSheet } from '@/components/PortraitSheet';
-import type { CharacterBody, CharacterItem } from '@/lib/api';
+import type { CharacterBody, CharacterItem, CharacterRelation } from '@/lib/api';
 import { ApiError, CHARACTER_STATUS_LABEL } from '@/lib/api';
 import { friendlyError, useAuth } from '@/lib/auth';
 import { C, R } from '@/lib/theme';
@@ -63,6 +63,7 @@ const EMPTY_FORM: CharacterBody = {
   speech_style: '',
   mental_state: '',
   status: 'alive',
+  aliases: [],
 };
 
 /** 角色面板：列表 + 手动新建/编辑/删除 + AI 批量生成 */
@@ -75,6 +76,7 @@ export function CharactersPanel({ projectId }: { projectId: number }) {
   const [toast, toastNode] = useToast();
   const [confirm, confirmNode] = useConfirm();
   const [portraitChar, setPortraitChar] = useState<CharacterItem | null>(null);
+  const [relationsChar, setRelationsChar] = useState<CharacterItem | null>(null);
   const [aiOpen, setAiOpen] = useState(false);
   const [aiCount, setAiCount] = useState(3);
   const [aiRole, setAiRole] = useState('');
@@ -129,6 +131,7 @@ export function CharactersPanel({ projectId }: { projectId: number }) {
       speech_style: c.speech_style ?? '',
       mental_state: c.mental_state ?? '',
       status: c.status || 'alive',
+      aliases: Array.isArray(c.aliases) ? c.aliases : [],
     });
   };
 
@@ -277,6 +280,22 @@ export function CharactersPanel({ projectId }: { projectId: number }) {
                 {dead ? <Chip label={CHARACTER_STATUS_LABEL[c.status!] ?? c.status!} fg={C.seal} bg={C.sealSoft} /> : null}
                 <View style={{ flex: 1 }} />
                 <Pressable
+                  onPress={() => setRelationsChar(c)}
+                  hitSlop={6}
+                  style={{
+                    width: 30,
+                    height: 30,
+                    borderRadius: 10,
+                    backgroundColor: C.card2,
+                    borderWidth: 1,
+                    borderColor: C.borderSoft,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <Ionicons name="git-network-outline" size={15} color={C.blue} />
+                </Pressable>
+                <Pressable
                   onPress={() => setPortraitChar(c)}
                   hitSlop={6}
                   style={{
@@ -339,6 +358,13 @@ export function CharactersPanel({ projectId }: { projectId: number }) {
 
         <FieldLabel>身份</FieldLabel>
         <Input value={form.identity ?? ''} onChangeText={(v) => set({ identity: v })} placeholder="如：青云宗内门弟子" />
+        <MultiSelectField
+          label="别名/称呼"
+          options={[]}
+          value={form.aliases ?? []}
+          onChange={(v) => set({ aliases: v })}
+          placeholder="如：顾三、顾公子（正文召回时一起匹配）"
+        />
         <FieldLabel>性格</FieldLabel>
         <Input value={form.personality ?? ''} onChangeText={(v) => set({ personality: v })} placeholder="性格关键词" multiline height={80} />
         <FieldLabel>外貌</FieldLabel>
@@ -393,6 +419,8 @@ export function CharactersPanel({ projectId }: { projectId: number }) {
         onUpdated={load}
       />
 
+      <RelationsSheet projectId={projectId} character={relationsChar} onClose={() => setRelationsChar(null)} />
+
       {/* AI 批量生成角色 */}
       <SheetModal visible={aiOpen} onClose={() => setAiOpen(false)} title="AI 生成角色">
         <Text style={{ color: C.text3, fontSize: 12, lineHeight: 18 }}>
@@ -446,5 +474,105 @@ export function CharactersPanel({ projectId }: { projectId: number }) {
         <Text style={{ color: C.text3, fontSize: 11, lineHeight: 16, textAlign: 'center' }}>异步执行不占手机，完成后回本页下拉刷新</Text>
       </SheetModal>
     </View>
+  );
+}
+
+const RELATION_SOURCE_LABEL: Record<string, string> = {
+  incremental: 'AI 增量分析',
+  manual: '手动',
+  auto: 'AI 分析',
+};
+
+/** 单个角色的人际关系面板：对方/类型/亲密度 + AI 分析的置信度与证据（可展开） */
+function RelationsSheet({ projectId, character, onClose }: { projectId: number; character: CharacterItem | null; onClose: () => void }) {
+  const { api } = useAuth();
+  const [toast, toastNode] = useToast();
+  const [all, setAll] = useState<CharacterRelation[] | null>(null);
+  const [openEvidence, setOpenEvidence] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!character || !api) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- 打开面板时先置空再异步拉关系列表
+    setAll(null);
+    setOpenEvidence(null);
+    api
+      .listRelations(projectId)
+      .then((list) => setAll(list ?? []))
+      .catch((e) => {
+        setAll([]);
+        toast(friendlyError(e));
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [character?.id]);
+
+  if (!character) return null;
+
+  /** 有向关系：箭头方向标出谁对谁 */
+  const rows = (all ?? []).filter((r) => r.from_character_id === character.id || r.to_character_id === character.id);
+  const counterpart = (r: CharacterRelation) =>
+    r.from_character_id === character.id ? { name: r.to_name ?? '?', outgoing: true } : { name: r.from_name ?? '?', outgoing: false };
+
+  return (
+    <>
+      {toastNode}
+      <SheetModal visible onClose={onClose} title={`人际关系 · ${character.name}`}>
+        {all === null ? (
+          <Skeleton count={3} height={72} />
+        ) : rows.length === 0 ? (
+          <EmptyState icon="git-network-outline" title="还没有关系" sub="开「自动关系分析」或让 AI 批量生成后，这里会展示 TA 与其他角色的关系" />
+        ) : (
+          rows.map((r) => {
+            const cp = counterpart(r);
+            const conf = typeof r.confidence === 'number' ? Math.round(r.confidence * 100) : null;
+            const evidence = r.evidence ?? [];
+            const evOpen = openEvidence === r.id;
+            return (
+              <View key={r.id} style={{ backgroundColor: C.card, borderWidth: 1, borderColor: C.borderSoft, borderRadius: R.m, padding: 12, gap: 7 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <Ionicons name={cp.outgoing ? 'arrow-forward' : 'arrow-back'} size={13} color={C.text3} />
+                  <Text style={{ color: C.text, fontSize: 14, fontWeight: '700', flex: 1 }} numberOfLines={1}>
+                    {cp.name}
+                  </Text>
+                  <Chip label={r.relation_type} fg={C.gold} bg={C.goldSoft} bold />
+                </View>
+                {r.description ? (
+                  <Text style={{ color: C.text2, fontSize: 12, lineHeight: 18 }} numberOfLines={3}>
+                    {r.description}
+                  </Text>
+                ) : null}
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                  {typeof r.intimacy === 'number' && r.intimacy !== 0 ? (
+                    <Chip label={r.intimacy > 0 ? `亲密 ${r.intimacy}` : `敌对 ${Math.abs(r.intimacy)}`} fg={r.intimacy > 0 ? C.green : C.seal} bg={r.intimacy > 0 ? C.greenSoft : C.sealSoft} />
+                  ) : null}
+                  {r.last_updated_chapter ? <Chip label={`依据至第${r.last_updated_chapter}章`} /> : null}
+                  {r.source ? <Chip label={RELATION_SOURCE_LABEL[r.source] ?? r.source} /> : null}
+                  {conf !== null ? (
+                    <Chip label={`置信度 ${conf}%`} fg={conf >= 70 ? C.green : C.text2} bg={conf >= 70 ? C.greenSoft : C.card2} />
+                  ) : null}
+                </View>
+                {evidence.length > 0 ? (
+                  <View style={{ gap: 4 }}>
+                    <Pressable onPress={() => setOpenEvidence(evOpen ? null : r.id)} style={{ flexDirection: 'row', alignItems: 'center', gap: 5, alignSelf: 'flex-start' }}>
+                      <Ionicons name={evOpen ? 'chevron-down' : 'chevron-forward'} size={12} color={C.text3} />
+                      <Text style={{ color: C.text3, fontSize: 11, fontWeight: '600' }}>证据 {evidence.length} 条{evOpen ? '' : '（展开）'}</Text>
+                    </Pressable>
+                    {evOpen ? (
+                      <View style={{ backgroundColor: '#0F121B', borderWidth: 1, borderColor: '#242A3B', borderRadius: R.s, padding: 9, gap: 6 }}>
+                        {evidence.slice(0, 6).map((ev, i) => (
+                          <Text key={i} style={{ color: C.text3, fontSize: 11.5, lineHeight: 17 }}>
+                            {ev.source === 'profile' || ev.type === 'profile' ? '〔档案〕' : ev.snippet?.startsWith('第') ? '' : '〔正文〕'}
+                            {ev.snippet ?? ''}
+                          </Text>
+                        ))}
+                      </View>
+                    ) : null}
+                  </View>
+                ) : null}
+              </View>
+            );
+          })
+        )}
+      </SheetModal>
+    </>
   );
 }

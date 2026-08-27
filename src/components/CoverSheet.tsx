@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import { useState } from 'react';
 import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 
@@ -97,6 +98,41 @@ export function CoverSheet({ projectId, initialPrompt, onCoverChanged }: { proje
     }
   };
 
+  /** 从手机相册选一张图上传当封面（服务端转存 PNG 覆盖式保存，≤15MB）。
+   *  库选择器走系统 UI，无需预先申请相册权限（v57 文档明确）。 */
+  const pickAndUpload = async () => {
+    if (!api || busy) return;
+    const res = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      quality: 1,
+      allowsMultipleSelection: false,
+    });
+    if (res.canceled || !res.assets?.length) return;
+    const a = res.assets[0];
+    if (a.fileSize && a.fileSize > 15 * 1024 * 1024) {
+      toast('图片超过 15MB 上限');
+      return;
+    }
+    setBusy(true);
+    setPhase('上传封面中…');
+    try {
+      const r = await api.uploadCover(projectId, {
+        uri: a.uri,
+        name: a.fileName ?? `cover.${a.mimeType === 'image/png' ? 'png' : 'jpg'}`,
+        type: a.mimeType || 'image/jpeg',
+      });
+      clearAuthImageCache();
+      onCoverChanged();
+      setOpen(false);
+      toast(`封面已上传（${r.size || `${a.width}x${a.height}`}）`);
+    } catch (e) {
+      toast(friendlyError(e));
+    } finally {
+      setBusy(false);
+      setPhase('');
+    }
+  };
+
   return (
     <View>
       {toastNode}
@@ -115,7 +151,7 @@ export function CoverSheet({ projectId, initialPrompt, onCoverChanged }: { proje
         })}
       >
         <Ionicons name="image-outline" size={16} color={C.gold} />
-        <Text style={{ color: C.gold, fontSize: 14, fontWeight: '700' }}>AI 生成封面</Text>
+        <Text style={{ color: C.gold, fontSize: 14, fontWeight: '700' }}>封面</Text>
       </Pressable>
 
       <SheetModal visible={open} onClose={() => !busy && setOpen(false)} title="AI 生成封面">
@@ -184,8 +220,22 @@ export function CoverSheet({ projectId, initialPrompt, onCoverChanged }: { proje
           </Pressable>
         </View>
 
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 2 }}>
+          <View style={{ height: 1, flex: 1, backgroundColor: C.borderSoft }} />
+          <Text style={{ color: C.text3, fontSize: 11 }}>或</Text>
+          <View style={{ height: 1, flex: 1, backgroundColor: C.borderSoft }} />
+        </View>
+        <Pressable
+          onPress={pickAndUpload}
+          disabled={busy}
+          style={{ height: 44, borderRadius: R.m, backgroundColor: C.card2, borderWidth: 1, borderColor: C.border, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 7 }}
+        >
+          <Ionicons name="cloud-upload-outline" size={16} color={C.text2} />
+          <Text style={{ color: C.text2, fontSize: 14, fontWeight: '600' }}>上传本地封面（自己做的图）</Text>
+        </Pressable>
+
         <Text style={{ color: C.text3, fontSize: 11, lineHeight: 16, textAlign: 'center' }}>
-          需要在服务端配置图像生成 API 才能出图
+          AI 出图需要在服务端配置图像生成 API；上传本地封面支持 PNG/JPG/WebP（≤15MB）
         </Text>
       </SheetModal>
     </View>

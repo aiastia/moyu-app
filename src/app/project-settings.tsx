@@ -50,6 +50,9 @@ export default function ProjectSettingsScreen() {
   const [thinking, setThinking] = useState<ThinkingModes | null>(null);
   const [englishExclude, setEnglishExclude] = useState<string | null>(null);
   const [savingExclude, setSavingExclude] = useState(false);
+  const [extraRules, setExtraRules] = useState<string | null>(null);
+  const [savingRules, setSavingRules] = useState(false);
+  const [autoRelation, setAutoRelation] = useState<boolean | null>(null);
 
   const guard = useCallback(
     async (e: unknown) => {
@@ -75,6 +78,8 @@ export default function ProjectSettingsScreen() {
       api.getPromptModules(projectId).then(setModules).catch(() => undefined),
       api.getThinkingModes(projectId).then((r) => setThinking(r.modes)).catch(() => undefined),
       api.getEnglishExclude(projectId).then((r) => setEnglishExclude(r.english_scan_exclude ?? '')).catch(() => setEnglishExclude('')),
+      api.getExtraWritingRules(projectId).then((r) => setExtraRules(r.extra_writing_rules ?? '')).catch(() => setExtraRules('')),
+      api.getAutoRelation(projectId).then((r) => setAutoRelation(r.auto_relation_on_create)).catch(() => setAutoRelation(null)),
     ];
     await Promise.all(jobs);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -104,6 +109,16 @@ export default function ProjectSettingsScreen() {
       .then(() => toast('已保存'))
       .catch((e) => toast(friendlyError(e)))
       .finally(() => setSavingExclude(false));
+  };
+
+  const saveRules = () => {
+    if (!api || extraRules === null || savingRules) return;
+    setSavingRules(true);
+    api
+      .updateExtraWritingRules(projectId, extraRules)
+      .then(() => toast('已保存'))
+      .catch((e) => toast(friendlyError(e)))
+      .finally(() => setSavingRules(false));
   };
 
   return (
@@ -323,6 +338,35 @@ export default function ProjectSettingsScreen() {
             />
           </Card>
         ) : null}
+
+        <Card title="写作规则与角色" hint="注入本书生成的附加写作规则，与角色自动关系分析">
+          {extraRules !== null ? (
+            <>
+              <Input value={extraRules} onChangeText={setExtraRules} placeholder={'附加写作规则（多行），如：\n战斗场面多用短句\n避免「竟然」等词'} multiline height={100} />
+              <Pressable onPress={saveRules} disabled={savingRules} style={{ height: 44, borderRadius: R.m, backgroundColor: C.gold, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 7 }}>
+                {savingRules ? <ActivityIndicator size="small" color="#1A1206" /> : <Ionicons name="checkmark" size={16} color="#1A1206" />}
+                <Text style={{ color: '#1A1206', fontSize: 14.5, fontWeight: '800' }}>{savingRules ? '保存中…' : '保存规则'}</Text>
+              </Pressable>
+            </>
+          ) : (
+            <ActivityIndicator color={C.gold} />
+          )}
+          {autoRelation !== null ? (
+            <Toggle
+              label="新建角色自动关系分析"
+              hint="手动建角色/批量生成后，自动分析 TA 与已有角色的关系"
+              value={autoRelation}
+              onChange={(v) => {
+                const prev = autoRelation;
+                setAutoRelation(v);
+                put(
+                  () => api!.updateAutoRelation(projectId, v),
+                  () => setAutoRelation(prev),
+                );
+              }}
+            />
+          ) : null}
+        </Card>
 
         <Card title="英文排除词" hint="AI 痕迹扫描时忽略的英文词（每行一个，如 API、app）">
           {englishExclude !== null ? (

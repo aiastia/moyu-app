@@ -129,6 +129,18 @@ export default function SettingsScreen() {
             </View>
             <Ionicons name="chevron-forward" size={15} color={C.text3} />
           </Pressable>
+          <Pressable onPress={() => router.push('/skill-market')} style={{ flexDirection: 'row', alignItems: 'center', gap: 11 }}>
+            <View style={{ width: 34, height: 34, borderRadius: 11, backgroundColor: C.card2, alignItems: 'center', justifyContent: 'center' }}>
+              <Ionicons name="grid-outline" size={16} color={C.gold} />
+            </View>
+            <View style={{ flex: 1, gap: 1 }}>
+              <Text style={{ color: C.text3, fontSize: 11 }}>技能广场</Text>
+              <Text style={{ color: C.text, fontSize: 14, fontWeight: '600' }} numberOfLines={1}>
+                共享聊天技能 / 导入副本
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={15} color={C.text3} />
+          </Pressable>
           <Row icon="text-outline" label="阅读排版" value="字号/行距/段距在阅读页右上角「Aa」中调整" />
         </Card>
 

@@ -119,6 +119,27 @@ export default function WritingStylesScreen() {
       .finally(() => setDefaultBusy(null));
   };
 
+  /** 预设被手动改乱时恢复为代码内置定义 */
+  const restorePreset = (s: WritingStyleItem) => {
+    if (!api) return;
+    confirm({
+      title: '恢复预设',
+      message: `把内置预设「${s.name}」恢复为出厂定义？你对它做过的修改会被覆盖。`,
+      confirmText: '恢复',
+      onConfirm: () => {
+        setDefaultBusy(s.id);
+        api
+          .restoreWritingStylePreset(s.id)
+          .then(() => {
+            toast(`「${s.name}」已恢复为内置定义`);
+            load();
+          })
+          .catch((e) => toast(friendlyError(e)))
+          .finally(() => setDefaultBusy(null));
+      },
+    });
+  };
+
   const cur = editing && editing !== 'new' ? editing : null;
 
   return (
@@ -201,7 +222,16 @@ export default function WritingStylesScreen() {
                   >
                     <Text style={{ color: C.seal, fontSize: 12.5, fontWeight: '700' }}>删除</Text>
                   </Pressable>
-                ) : null}
+                ) : (
+                  <Pressable
+                    onPress={() => restorePreset(s)}
+                    disabled={defaultBusy !== null}
+                    style={{ height: 34, paddingHorizontal: 14, borderRadius: 11, backgroundColor: C.card2, borderWidth: 1, borderColor: C.border, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 5 }}
+                  >
+                    <Ionicons name="refresh-outline" size={13} color={C.text2} />
+                    <Text style={{ color: C.text2, fontSize: 12.5, fontWeight: '700' }}>恢复预设</Text>
+                  </Pressable>
+                )}
               </View>
             </View>
           ))

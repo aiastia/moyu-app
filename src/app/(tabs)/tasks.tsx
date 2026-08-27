@@ -6,7 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Chip, EmptyState, ProgressBar, ScreenHeader, SheetModal, Skeleton, useConfirm, useToast } from '@/components/ui';
 import type { TaskItem } from '@/lib/api';
-import { ApiError } from '@/lib/api';
+import { ApiError, TASK_TYPE_LABEL } from '@/lib/api';
 import { friendlyError, useAuth } from '@/lib/auth';
 import { fmtRelative, STATUS_LABEL } from '@/lib/format';
 import { C, R, SP } from '@/lib/theme';
@@ -133,9 +133,19 @@ function TaskDetailSheet({
   if (!task) return null;
   const s = statusStyle(task.status);
   const active = task.status === 'running' || task.status === 'pending';
+  // 通读审稿的结构化进度（review/findings/phase/last_completed_chapter）
+  const details = (task.progress_details ?? {}) as {
+    review?: { done?: number; total?: number };
+    findings?: number;
+    phase?: string;
+    last_completed_chapter?: number;
+    state_summary?: string;
+  };
+  const typeLabel = TASK_TYPE_LABEL[task.task_type];
   return (
     <SheetModal visible onClose={onClose} title={`任务 #${task.id}`}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+        {typeLabel ? <Chip label={typeLabel} fg={C.purple} bg={C.purpleSoft} bold /> : null}
         <Text style={{ color: C.text, fontSize: 15, fontWeight: '800', flex: 1 }} numberOfLines={2}>
           {task.title || task.task_type}
         </Text>
@@ -148,6 +158,25 @@ function TaskDetailSheet({
           <Text style={{ color: C.text3, fontSize: 11 }}>
             {task.status === 'running' ? `${task.progress ?? 0}%` : task.queue_position ? `排队中 · 第 ${task.queue_position} 位` : '排队中'}
           </Text>
+        </View>
+      ) : null}
+
+      {task.task_type === 'chat_read_review' && (details.review || details.phase) ? (
+        <View style={{ backgroundColor: C.card2, borderRadius: 10, padding: 11, gap: 5 }}>
+          {details.review ? (
+            <Text style={{ color: C.text2, fontSize: 12.5 }}>
+              已通读 {details.review.done ?? 0}/{details.review.total ?? '?'} 章
+              {details.last_completed_chapter ? ` · 读到第 ${details.last_completed_chapter} 章` : ''}
+            </Text>
+          ) : null}
+          {details.findings != null ? <Text style={{ color: C.text2, fontSize: 12.5 }}>发现 {details.findings} 个问题</Text> : null}
+          {details.phase ? (
+            <Text style={{ color: C.text3, fontSize: 11.5 }}>
+              阶段：{
+                { starting: '启动中', reading: '通读正文', patching: '生成修改补丁', reporting: '汇总报告', cancelled_partial: '中断（可续审）' }[details.phase] ?? details.phase
+              }
+            </Text>
+          ) : null}
         </View>
       ) : null}
 

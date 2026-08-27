@@ -549,7 +549,20 @@ export default function ProjectScreen() {
         contentContainerStyle={{ flexGrow: 1, padding: SP.l, gap: 14, paddingBottom: 36 }}
         refreshControl={<RefreshControl refreshing={refreshing} tintColor={C.gold} colors={[C.gold]} onRefresh={onRefresh} />}
       >
-        <ScreenHeader title={project?.title ?? '加载中…'} onBack={() => router.back()} />
+        <ScreenHeader
+          title={project?.title ?? '加载中…'}
+          onBack={() => router.back()}
+          right={
+            <Pressable
+              onPress={() => router.push({ pathname: '/project/[id]/chat', params: { id: String(projectId) } })}
+              hitSlop={6}
+              style={{ paddingHorizontal: 13, height: 36, borderRadius: 12, backgroundColor: C.goldSoft, borderWidth: 1, borderColor: 'rgba(229,181,88,0.4)', flexDirection: 'row', alignItems: 'center', gap: 6 }}
+            >
+              <Ionicons name="sparkles" size={15} color={C.gold} />
+              <Text style={{ color: C.gold, fontSize: 13, fontWeight: '700' }}>AI 助手</Text>
+            </Pressable>
+          }
+        />
 
         {project === null && !error ? (
           <Skeleton count={3} height={100} />
