@@ -749,10 +749,13 @@ export default function ChatScreen() {
           </ScrollView>
         )}
 
-        {/* 输入区 */}
+        {/* 输入区。edge-to-edge 下 adjustResize 不压缩窗口，键盘高度垫在本 wrapper 底部、
+            挤压缩上方的消息 ScrollView，把输入卡整体抬到键盘上方（编辑器 v1.9.1 同款思路）；
+            卡片 maxHeight 用固定上限——不能减键盘高度，真机键盘(~300dp) > 0.3×屏高会减出
+            负值/过小值导致卡片塌陷被裁（v2.0.0 真机复现：发送按钮剩一半、字数计数不见）。 */}
         {activeSession ? (
           <View style={{ paddingBottom: Math.max(kbH, insets.bottom), gap: 8 }}>
-            <View style={{ backgroundColor: C.card, borderWidth: 1, borderColor: C.borderSoft, borderRadius: R.l, padding: 9, gap: 8, maxHeight: Math.round(winH * 0.3) - Math.max(kbH, insets.bottom) }}>
+            <View style={{ backgroundColor: C.card, borderWidth: 1, borderColor: C.borderSoft, borderRadius: R.l, padding: 9, gap: 8, maxHeight: Math.round(winH * 0.26) }}>
               <TextInput
                 value={input}
                 onChangeText={setInput}
@@ -762,7 +765,7 @@ export default function ChatScreen() {
                 multiline
                 blurOnSubmit={false}
                 onSubmitEditing={() => send()}
-                style={{ color: C.text, fontSize: 14.5, lineHeight: 21, paddingHorizontal: 6, maxHeight: Math.round(winH * 0.18) }}
+                style={{ color: C.text, fontSize: 14.5, lineHeight: 21, paddingHorizontal: 6, maxHeight: Math.round(winH * 0.16) }}
               />
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                 <Text style={{ color: C.text3, fontSize: 11, flex: 1 }}>{input.length > 8000 ? `超出上限（${input.length}/8000）` : `${input.length}/8000`}</Text>
