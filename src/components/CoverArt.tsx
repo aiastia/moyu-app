@@ -6,8 +6,9 @@ import { useAuthImage } from '@/lib/image';
 import { C, COVER_GRADIENTS } from '@/lib/theme';
 
 /**
- * 封面图：优先从服务端拉取（带 Bearer，会话内缓存），失败退回首字鎏金渐变卡。
- * refreshKey 变化会强制重新拉取（封面重新生成后传新值）。
+ * 封面图：remoteUrl 是外链封面（http(s)，直连不带鉴权）时直接加载；
+ * 否则从服务端拉取（带 Bearer，会话内缓存），thumb=true 走 320px 缩略图端点（列表用省流量）。
+ * 都没有时退回首字鎏金渐变卡。refreshKey 变化会强制重新拉取（封面重新生成后传新值）。
  */
 export function CoverArt({
   projectId,
@@ -16,6 +17,8 @@ export function CoverArt({
   height = 100,
   radius = 10,
   refreshKey = 0,
+  remoteUrl,
+  thumb = false,
 }: {
   projectId: number;
   title: string;
@@ -23,9 +26,20 @@ export function CoverArt({
   height?: number;
   radius?: number;
   refreshKey?: number;
+  /** 项目的外链封面地址（book.cover / project.cover_url），http(s) 才生效 */
+  remoteUrl?: string | null;
+  /** 用缩略图端点（bookshelf 列表；大图详情页不要开） */
+  thumb?: boolean;
 }) {
   const { api } = useAuth();
-  const uri = useAuthImage(api ? `cover:${projectId}` : null, api ? api.coverUrl(projectId) : null, refreshKey);
+  const isExternal = !!remoteUrl && /^https?:\/\//i.test(remoteUrl);
+  // hook 无条件调用（外链只是参数为 null，不跳过执行）
+  const authUri = useAuthImage(
+    api ? `cover${thumb ? '-thumb' : ''}:${projectId}` : null,
+    api && !isExternal ? (thumb && api.coverThumbUrl ? api.coverThumbUrl(projectId) : api.coverUrl(projectId)) : null,
+    refreshKey,
+  );
+  const uri = isExternal ? remoteUrl! : authUri;
 
   if (uri) {
     return <Image source={{ uri }} style={{ width, height, borderRadius: radius, backgroundColor: C.card2 }} />;

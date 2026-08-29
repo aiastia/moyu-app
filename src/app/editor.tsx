@@ -15,7 +15,8 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Chip, FieldLabel, Input, SelectField, SheetModal, useConfirm, useToast } from '@/components/ui';
-import type { ChapterFull, RegenTask } from '@/lib/api';
+import { ShortReviewView } from '@/components/ShortReviewView';
+import type { ChapterFull, ChapterSegmentRow, RegenTask } from '@/lib/api';
 import { ApiError } from '@/lib/api';
 import { friendlyError, useAuth } from '@/lib/auth';
 import { fmtRelative } from '@/lib/format';
@@ -32,6 +33,14 @@ const POLISH_SKILL_OPTIONS = [
   { value: 'humanize_pro', label: '人化重写（深度）', hint: '深度重写，文风更自然但改动大' },
 ];
 
+/** 段状态 → 中文 */
+const SEG_STATUS_LABEL: Record<string, string> = {
+  pending: '待生成',
+  running: '生成中',
+  done: '已完成',
+  failed: '失败',
+};
+
 /** 重写任务状态 → 中文 */
 const REGEN_STATUS_LABEL: Record<string, string> = {
   pending: '排队中',
@@ -41,11 +50,30 @@ const REGEN_STATUS_LABEL: Record<string, string> = {
   cancelled: '已取消',
 };
 
-/** AI 工具弹窗的子页 */
-type ToolPage = 'menu' | 'polish' | 'regen' | 'history' | `history:${number}` | 'restore';
+/** AI 工具弹窗的子页（segs=段列表，seg:N=第 N 段详情） */
+type ToolPage = 'menu' | 'polish' | 'regen' | 'history' | `history:${number}` | 'restore' | 'segs' | `seg:${number}` | 'shortreview';
 
 const BODY_LINE_HEIGHT = 24;
 const BODY_MIN_HEIGHT = 240;
+
+/** AI 工具菜单行（图标 + 标题 + 说明 + 箭头） */
+function MenuRow({ icon, color, title, sub, onPress }: { icon: keyof typeof Ionicons.glyphMap; color: string; title: string; sub: string; onPress: () => void }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 13, borderRadius: R.m, backgroundColor: pressed ? C.card2 : C.card, borderWidth: 1, borderColor: C.borderSoft })}
+    >
+      <View style={{ width: 36, height: 36, borderRadius: 12, backgroundColor: C.card2, alignItems: 'center', justifyContent: 'center' }}>
+        <Ionicons name={icon} size={17} color={color} />
+      </View>
+      <View style={{ flex: 1, gap: 2 }}>
+        <Text style={{ color: C.text, fontSize: 14, fontWeight: '700' }}>{title}</Text>
+        <Text style={{ color: C.text3, fontSize: 11.5, lineHeight: 16 }}>{sub}</Text>
+      </View>
+      <Ionicons name="chevron-forward" size={15} color={C.text3} />
+    </Pressable>
+  );
+}
 
 export default function EditorScreen() {
   const { projectId: pid, chapterId: cid } = useLocalSearchParams<{ projectId: string; chapterId: string }>();
@@ -178,6 +206,29 @@ export default function EditorScreen() {
     }
   }, [api, projectId, chapterId, logout]);
 
+  /** 项目篇幅（短篇审稿入口只对 short/single 显示；失败按长篇处理不影响编辑） */
+  const [storyKind, setStoryKind] = useState('long');
+  useEffect(() => {
+    if (!api || Number.isNaN(projectId)) return;
+    api.getProject(projectId).then((p) => setStoryKind(p.story_kind || 'long')).catch(() => undefined);
+  }, [api, projectId]);
+
+  // ===== 段级行（短篇分段章）：segments 非空 = 分段章，整篇润色/重写走段级端点 =====
+  const [segs, setSegs] = useState<ChapterSegmentRow[] | null>(null);
+  const segmented = !!segs && segs.length > 0;
+
+  const refreshSegs = useCallback(() => {
+    if (!api || Number.isNaN(projectId) || Number.isNaN(chapterId)) return;
+    api
+      .getChapterSegments(projectId, chapterId)
+      .then((r) => setSegs(r.segments ?? []))
+      .catch(() => setSegs([]));
+  }, [api, projectId, chapterId]);
+
+  useEffect(() => {
+    refreshSegs();
+  }, [refreshSegs]);
+
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- 首载拉数据，与各面板同款
     load();
@@ -220,6 +271,94 @@ export default function EditorScreen() {
   const [regenList, setRegenList] = useState<RegenTask[] | null>(null);
   const [applyBusy, setApplyBusy] = useState(false);
   const [restoreBusy, setRestoreBusy] = useState(false);
+
+  // ===== 段级工具状态（seg:N 详情页） =====
+  const [segDraft, setSegDraft] = useState('');
+  const [segSaving, setSegSaving] = useState(false);
+  const [segSkill, setSegSkill] = useState('ai_denoising');
+  const [segNote, setSegNote] = useState('');
+  const [segChain, setSegChain] = useState(false);
+  const [segBusy, setSegBusy] = useState(false);
+  /** 短篇审稿结果页的提交/刷新态 */
+  const [reviewBusy, setReviewBusy] = useState(false);
+
+  const currentSeg = useMemo(() => {
+    if (toolPage && toolPage.startsWith('seg:')) {
+      const idx = Number(toolPage.slice('seg:'.length));
+      return segs?.find((s) => s.seg_index === idx) ?? null;
+    }
+    return null;
+  }, [toolPage, segs]);
+
+  /** 进入段详情时把段正文灌进编辑草稿 */
+  const openSeg = (idx: number) => {
+    const s = segs?.find((x) => x.seg_index === idx);
+    setSegDraft(s?.content ?? '');
+    setSegNote('');
+    setSegChain(false);
+    setToolPage(`seg:${idx}`);
+  };
+
+  const saveSeg = () => {
+    if (!api || !currentSeg || segSaving) return;
+    setSegSaving(true);
+    api
+      .updateChapterSegment(projectId, chapterId, currentSeg.seg_index, segDraft)
+      .then(() => {
+        toast(`第 ${currentSeg.seg_index} 段已保存`);
+        refreshSegs();
+        bumpChapterVersion(projectId, chapterId);
+      })
+      .catch((e) => toast(friendlyError(e)))
+      .finally(() => setSegSaving(false));
+  };
+
+  /** 段级 AI 任务（生成/重写/润色）：统一确认提交 */
+  const submitSegTask = (kind: 'generate' | 'rewrite' | 'polish') => {
+    if (!api || !currentSeg || segBusy) return;
+    if (kind === 'polish' && !(currentSeg.content || '').trim()) {
+      toast('该段还没有内容，先保存或生成');
+      return;
+    }
+    const labels = { generate: '生成', rewrite: '重写', polish: '润色' };
+    const extra = kind === 'rewrite' && segChain ? '，并连锁重写后续段' : '';
+    confirm({
+      title: `${labels[kind]}第 ${currentSeg.seg_index} 段`,
+      message: `AI 对这一段执行${labels[kind]}${extra}（异步任务，任务页看进度）。章合并缓存会自动重算。`,
+      confirmText: '提交',
+      onConfirm: () => {
+        setSegBusy(true);
+        const call =
+          kind === 'generate'
+            ? api.generateSegmentAsync(projectId, chapterId, currentSeg.seg_index, segNote.trim())
+            : kind === 'rewrite'
+              ? api.rewriteSegmentAsync(projectId, chapterId, currentSeg.seg_index, { chain: segChain, user_instructions: segNote.trim() })
+              : api.polishSegmentAsync(projectId, chapterId, currentSeg.seg_index, segSkill as 'ai_denoising' | 'humanize_pro', segNote.trim());
+        call
+          .then(() => toast(`已提交${labels[kind]}任务，完成后回本页下拉查看新正文`))
+          .catch((e) => toast(friendlyError(e)))
+          .finally(() => setSegBusy(false));
+      },
+    });
+  };
+
+  /** 提交短篇单章审稿（结果存 chapter.short_review，完成后刷新可看） */
+  const submitShortReview = () => {
+    if (!api || reviewBusy) return;
+    confirm({
+      title: '短篇审稿',
+      message: 'AI 按三标准（前三行留人/信息差账本/结尾回甘）审本章，结果回存到章节（异步任务）。',
+      confirmText: '开始审稿',
+      onConfirm: () => {
+        setReviewBusy(true);
+        api
+          .shortReviewAsync(projectId, chapterId)
+          .then(() => toast('已提交审稿任务，完成后回本页刷新查看结果'))
+          .catch((e) => toast(friendlyError(e)))
+          .finally(() => setReviewBusy(false));
+      },
+    });
+  };
 
   const openTool = (page: ToolPage) => {
     setToolPage(page);
@@ -334,7 +473,23 @@ export default function EditorScreen() {
   });
 
   const toolTitle =
-    toolPage === 'menu' ? 'AI 工具' : toolPage === 'polish' ? '整章润色' : toolPage === 'regen' ? 'AI 重写本章' : toolPage === 'restore' ? '恢复润色前原文' : '重写历史';
+    toolPage === 'menu'
+      ? 'AI 工具'
+      : toolPage === 'polish'
+        ? '整章润色'
+        : toolPage === 'regen'
+          ? 'AI 重写本章'
+          : toolPage === 'restore'
+            ? '恢复润色前原文'
+            : toolPage === 'history'
+              ? '重写历史'
+              : toolPage === 'segs'
+                ? '分段写作'
+                : toolPage === 'shortreview'
+                  ? '短篇审稿'
+                  : toolPage && toolPage.startsWith('seg:')
+                    ? `第 ${Number(toolPage.slice('seg:'.length))} 段`
+                    : '';
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
@@ -541,26 +696,59 @@ export default function EditorScreen() {
       >
         {toolPage === 'menu' ? (
           <View style={{ gap: 9 }}>
-            {[
-              { page: 'polish' as ToolPage, icon: 'color-filter-outline' as const, color: C.blue, title: '整章润色', sub: '去 AI 味 / 人化重写，完成后自动覆盖并备份原文' },
-              { page: 'regen' as ToolPage, icon: 'swap-horizontal-outline' as const, color: C.gold, title: 'AI 重写本章', sub: '按你的要求重写一版草稿，不覆盖正文，对比后手动应用' },
-              { page: 'history' as ToolPage, icon: 'time-outline' as const, color: C.purple, title: '重写历史', sub: '历次重写草稿对比与应用（回滚也在这里）' },
-            ].map((item) => (
+            {segmented ? (
               <Pressable
-                key={item.page}
-                onPress={() => openTool(item.page)}
-                style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 13, borderRadius: R.m, backgroundColor: pressed ? C.card2 : C.card, borderWidth: 1, borderColor: C.borderSoft })}
+                onPress={() => setToolPage('segs')}
+                style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 13, borderRadius: R.m, backgroundColor: pressed ? C.card2 : C.card, borderWidth: 1, borderColor: 'rgba(106,166,232,0.4)' })}
               >
-                <View style={{ width: 36, height: 36, borderRadius: 12, backgroundColor: C.card2, alignItems: 'center', justifyContent: 'center' }}>
-                  <Ionicons name={item.icon} size={17} color={item.color} />
+                <View style={{ width: 36, height: 36, borderRadius: 12, backgroundColor: C.blueSoft, alignItems: 'center', justifyContent: 'center' }}>
+                  <Ionicons name="grid-outline" size={17} color={C.blue} />
                 </View>
                 <View style={{ flex: 1, gap: 2 }}>
-                  <Text style={{ color: C.text, fontSize: 14, fontWeight: '700' }}>{item.title}</Text>
-                  <Text style={{ color: C.text3, fontSize: 11.5, lineHeight: 16 }}>{item.sub}</Text>
+                  <Text style={{ color: C.text, fontSize: 14, fontWeight: '700' }}>分段写作（本章 {segs?.length ?? 0} 段）</Text>
+                  <Text style={{ color: C.text3, fontSize: 11.5, lineHeight: 16 }}>按段编辑 / 生成 / 润色 / 重写，短篇分段章的正文工具都在这里</Text>
                 </View>
                 <Ionicons name="chevron-forward" size={15} color={C.text3} />
               </Pressable>
-            ))}
+            ) : (
+              <>
+                <MenuRow
+                  icon="color-filter-outline"
+                  color={C.blue}
+                  title="整章润色"
+                  sub="去 AI 味 / 人化重写，完成后自动覆盖并备份原文"
+                  onPress={() => openTool('polish')}
+                />
+                <MenuRow
+                  icon="swap-horizontal-outline"
+                  color={C.gold}
+                  title="AI 重写本章"
+                  sub="按你的要求重写一版草稿，不覆盖正文，对比后手动应用"
+                  onPress={() => openTool('regen')}
+                />
+              </>
+            )}
+            <MenuRow
+              icon="time-outline"
+              color={C.purple}
+              title="重写历史"
+              sub="历次重写草稿对比与应用（回滚也在这里）"
+              onPress={() => openTool('history')}
+            />
+            {storyKind === 'short' || storyKind === 'single' ? (
+              <MenuRow
+                icon="reader-outline"
+                color={C.green}
+                title="短篇审稿"
+                sub={chapter?.short_review ? '已有审稿结果，点开查看（可重新审）' : '前三行留人 / 信息差账本 / 结尾回甘三标准'}
+                onPress={() => setToolPage('shortreview')}
+              />
+            ) : null}
+            {segmented ? (
+              <Text style={{ color: C.text3, fontSize: 11, lineHeight: 16, textAlign: 'center' }}>
+                本章是分段章：整篇润色/整篇重写会清空分段结构，请走「分段写作」的段级工具
+              </Text>
+            ) : null}
             {chapter?.raw_output ? (
               <Pressable
                 onPress={restorePolish}
@@ -578,6 +766,125 @@ export default function EditorScreen() {
             ) : null}
             <Text style={{ color: C.text3, fontSize: 11, lineHeight: 16, textAlign: 'center' }}>润色与重写都是异步任务，提交后在「任务」页看进度</Text>
           </View>
+        ) : toolPage === 'segs' ? (
+          segs === null ? (
+            <ActivityIndicator color={C.gold} />
+          ) : (
+            <View style={{ gap: 9 }}>
+              {segs.map((s) => (
+                <Pressable
+                  key={s.id}
+                  onPress={() => openSeg(s.seg_index)}
+                  style={({ pressed }) => ({ backgroundColor: pressed ? C.card2 : C.card, borderWidth: 1, borderColor: C.borderSoft, borderRadius: R.m, padding: 13, gap: 5 })}
+                >
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <Text style={{ color: C.gold, fontSize: 13, fontWeight: '700' }}>第 {s.seg_index} 段</Text>
+                    {s.function ? <Chip label={s.function} fg={C.blue} bg={C.blueSoft} /> : null}
+                    <Chip
+                      label={SEG_STATUS_LABEL[s.status] ?? s.status}
+                      fg={s.status === 'done' ? C.green : s.status === 'pending' ? C.text3 : C.gold}
+                      bg={s.status === 'done' ? C.greenSoft : C.card2}
+                    />
+                    <View style={{ flex: 1 }} />
+                    <Ionicons name="chevron-forward" size={14} color={C.text3} />
+                  </View>
+                  {s.instruction ? (
+                    <Text style={{ color: C.text3, fontSize: 11.5, lineHeight: 16 }} numberOfLines={2}>
+                      {s.instruction}
+                    </Text>
+                  ) : null}
+                  <Text style={{ color: C.text3, fontSize: 11 }}>
+                    {s.word_count} 字{s.words ? ` / 预算 ${s.words}` : ''}
+                  </Text>
+                </Pressable>
+              ))}
+              <Text style={{ color: C.text3, fontSize: 11, lineHeight: 16, textAlign: 'center' }}>章正文 = 各段拼接；改段后自动重算</Text>
+            </View>
+          )
+        ) : toolPage?.startsWith('seg:') && currentSeg ? (
+          <>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+              {currentSeg.function ? <Chip label={currentSeg.function} fg={C.blue} bg={C.blueSoft} /> : null}
+              <Chip
+                label={SEG_STATUS_LABEL[currentSeg.status] ?? currentSeg.status}
+                fg={currentSeg.status === 'done' ? C.green : currentSeg.status === 'pending' ? C.text3 : C.gold}
+                bg={currentSeg.status === 'done' ? C.greenSoft : C.card2}
+              />
+              <Text style={{ color: C.text3, fontSize: 11.5, flex: 1, textAlign: 'right' }}>
+                {currentSeg.word_count} 字{currentSeg.words ? ` / 预算 ${currentSeg.words}` : ''}
+              </Text>
+            </View>
+            {currentSeg.instruction ? (
+              <View style={{ backgroundColor: '#0F121B', borderWidth: 1, borderColor: '#242A3B', borderRadius: R.m, padding: 11, gap: 4 }}>
+                <Text style={{ color: C.text2, fontSize: 11.5, fontWeight: '700' }}>本段写作指令</Text>
+                <Text style={{ color: C.text, fontSize: 12.5, lineHeight: 19 }}>{currentSeg.instruction}</Text>
+              </View>
+            ) : null}
+            <View style={{ gap: 7 }}>
+              <FieldLabel>段正文（保存后章合并缓存自动重算）</FieldLabel>
+              <Input value={segDraft} onChangeText={setSegDraft} placeholder="这一段的正文…" multiline height={160} />
+              <Pressable
+                onPress={saveSeg}
+                disabled={segSaving}
+                style={{ height: 42, borderRadius: R.m, backgroundColor: C.gold, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 7, opacity: segSaving ? 0.7 : 1 }}
+              >
+                {segSaving ? <ActivityIndicator size="small" color="#1A1206" /> : <Ionicons name="save-outline" size={15} color="#1A1206" />}
+                <Text style={{ color: '#1A1206', fontSize: 14, fontWeight: '800' }}>保存本段</Text>
+              </Pressable>
+            </View>
+
+            <View style={{ gap: 9 }}>
+              <FieldLabel>AI 操作（异步任务，任务页看进度）</FieldLabel>
+              <SelectField label="润色方式" value={segSkill} options={POLISH_SKILL_OPTIONS} onChange={setSegSkill} />
+              <View style={{ gap: 7 }}>
+                <FieldLabel>要求（可选，生成/重写/润色共用）</FieldLabel>
+                <Input value={segNote} onChangeText={setSegNote} placeholder="如：对话更口语化、节奏再快点" multiline height={70} />
+              </View>
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                <Pressable
+                  onPress={() => submitSegTask('generate')}
+                  disabled={segBusy || currentSeg.status === 'done'}
+                  style={({ pressed }) => ({ flex: 1, height: 42, borderRadius: R.m, backgroundColor: currentSeg.status === 'done' ? C.card2 : pressed ? '#20304A' : C.blueSoft, borderWidth: 1, borderColor: 'rgba(106,166,232,0.4)', alignItems: 'center', justifyContent: 'center', opacity: currentSeg.status === 'done' ? 0.5 : 1 })}
+                >
+                  <Text style={{ color: C.blue, fontSize: 13, fontWeight: '700' }}>{currentSeg.status === 'done' ? '已完成' : '生成此段'}</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => submitSegTask('rewrite')}
+                  disabled={segBusy}
+                  style={({ pressed }) => ({ flex: 1, height: 42, borderRadius: R.m, backgroundColor: pressed ? '#3A2F16' : C.goldSoft, borderWidth: 1, borderColor: 'rgba(229,181,88,0.4)', alignItems: 'center', justifyContent: 'center' })}
+                >
+                  <Text style={{ color: C.gold, fontSize: 13, fontWeight: '700' }}>重写此段</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => submitSegTask('polish')}
+                  disabled={segBusy}
+                  style={({ pressed }) => ({ flex: 1, height: 42, borderRadius: R.m, backgroundColor: pressed ? C.card2 : C.card, borderWidth: 1, borderColor: C.borderSoft, alignItems: 'center', justifyContent: 'center' })}
+                >
+                  <Text style={{ color: C.text2, fontSize: 13, fontWeight: '700' }}>润色此段</Text>
+                </Pressable>
+              </View>
+              <Pressable
+                onPress={() => setSegChain((v) => !v)}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}
+              >
+                <View
+                  style={{
+                    width: 20,
+                    height: 20,
+                    borderRadius: 7,
+                    borderWidth: 1,
+                    borderColor: segChain ? 'rgba(229,181,88,0.55)' : C.border,
+                    backgroundColor: segChain ? C.goldSoft : C.card2,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  {segChain ? <Ionicons name="checkmark" size={13} color={C.gold} /> : null}
+                </View>
+                <Text style={{ color: C.text2, fontSize: 12.5 }}>重写时连锁重写后续段（后续段按新前文重新生成）</Text>
+              </Pressable>
+            </View>
+          </>
         ) : toolPage === 'polish' ? (
           <>
             <Text style={{ color: C.text3, fontSize: 12, lineHeight: 18 }}>
@@ -695,6 +1002,28 @@ export default function EditorScreen() {
                 <Text style={{ color: '#1A1206', fontSize: 14.5, fontWeight: '800' }}>应用此版本</Text>
               </Pressable>
             </View>
+          </>
+        ) : toolPage === 'shortreview' ? (
+          <>
+            {chapter?.short_review ? <ShortReviewView review={chapter.short_review} /> : (
+              <Text style={{ color: C.text3, fontSize: 12.5, lineHeight: 19, textAlign: 'center', paddingVertical: 8 }}>
+                本章还没有审稿结果。
+              </Text>
+            )}
+            <Pressable
+              onPress={submitShortReview}
+              disabled={reviewBusy}
+              style={{ height: 46, borderRadius: R.m, backgroundColor: C.gold, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 8, opacity: reviewBusy ? 0.7 : 1 }}
+            >
+              {reviewBusy ? <ActivityIndicator size="small" color="#1A1206" /> : <Ionicons name="sparkles" size={16} color="#1A1206" />}
+              <Text style={{ color: '#1A1206', fontSize: 15, fontWeight: '800' }}>{chapter?.short_review ? '重新审稿' : '开始审稿'}</Text>
+            </Pressable>
+            <Text
+              onPress={() => load()}
+              style={{ color: C.blue, fontSize: 12, textAlign: 'center' }}
+            >
+              任务完成后点这里刷新结果
+            </Text>
           </>
         ) : null}
       </SheetModal>

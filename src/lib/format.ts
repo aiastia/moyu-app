@@ -54,7 +54,8 @@ export function fmtDate(iso?: string | null): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
-export const STORY_KIND_LABEL: Record<string, string> = { long: '长篇', short: '短篇' };
+/** story_kind 三值（与后端值域一一对应）：long=长篇连载 / short=多章短篇 / single=单章成篇 */
+export const STORY_KIND_LABEL: Record<string, string> = { long: '长篇', short: '多章短篇', single: '单章短篇' };
 
 export const STATUS_LABEL: Record<string, string> = {
   pending: '排队中',

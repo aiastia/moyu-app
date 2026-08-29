@@ -17,6 +17,7 @@ export function BookCard({
 }) {
   const pct = fmtPercent(book.current_word_count, book.target_word_count);
   const kind = STORY_KIND_LABEL[book.story_kind] ?? '作品';
+  const isShortKind = book.story_kind === 'short' || book.story_kind === 'single';
   const subCount = book.submissions?.count ?? 0;
   return (
     <Pressable
@@ -34,14 +35,15 @@ export function BookCard({
         opacity: pressed ? 0.92 : 1,
       })}
     >
-      <CoverArt projectId={book.id} title={book.title} />
+      {/* 列表用 320px 缩略图省流量；外链封面（book.cover 为 http(s)）直连 */}
+      <CoverArt projectId={book.id} title={book.title} remoteUrl={book.cover} thumb />
       <View style={{ flex: 1, gap: 7 }}>
         <Text style={{ color: C.text, fontSize: 17, fontWeight: '700' }} numberOfLines={1}>
           {book.title}
         </Text>
         <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
           {book.tag ? <Chip label={book.tag} fg={C.gold} bg={C.goldSoft} bold /> : null}
-          <Chip label={kind} fg={book.story_kind === 'short' ? C.purple : C.blue} bg={book.story_kind === 'short' ? C.purpleSoft : C.blueSoft} />
+          <Chip label={kind} fg={isShortKind ? C.purple : C.blue} bg={isShortKind ? C.purpleSoft : C.blueSoft} />
           {book.outline_mode === 'one_to_many' ? <Chip label="细化模式" fg={C.green} bg={C.greenSoft} /> : null}
           {subCount > 0 ? <Chip label={`已投 ${subCount}`} fg={C.gold} bg={C.goldSoft} /> : null}
           {book.status === 'archived' ? <Chip label="已归档" fg={C.text3} bg={C.card2} /> : null}

@@ -44,6 +44,8 @@ export interface ProjectDetail {
   outline_mode?: string;
   /** 当前绑定的写作风格（服务端存对象：{style_id, name, custom_prompt, …}，展示用 name） */
   writing_style?: { style_id?: number; name?: string; [k: string]: unknown } | null;
+  /** 短篇故事卡（短篇项目才有，长篇为 null） */
+  story_card?: StoryCard | null;
 }
 
 export interface ChapterRow {
@@ -73,6 +75,64 @@ export interface ChapterFull {
   /** 润色前的原文（没润色过为空；整章润色会覆盖 content，原文存这里可回滚） */
   raw_output?: string | null;
   raw_word_count?: number | null;
+  /** 短篇整篇审稿结果（短篇项目跑过「短篇审稿」任务后有值，JSON 结构见 ShortReview） */
+  short_review?: ShortReview | null;
+}
+
+// ===== 短篇（story_kind 三值：long=长篇连载 / short=多章短篇 / single=单章成篇） =====
+
+/** 短篇故事卡（八字段，存 project.settings.story_card；结局为空时网页工作台禁止生成——结局先行） */
+export interface StoryCard {
+  premise?: string;
+  hook?: string;
+  protagonist?: string;
+  goal?: string;
+  conflict?: string;
+  antagonist?: string;
+  twist?: string;
+  ending?: string;
+  [k: string]: unknown;
+}
+
+/** 短篇审稿三标准的单条意见（severity: high/mid/low） */
+export interface ShortReviewIssue {
+  issue?: string;
+  severity?: string;
+  suggestion?: string;
+  mode?: string;
+}
+
+/** 短篇整篇审稿结果（单章存 chapter.short_review，多章全书存 project.settings.short_review_book，结构相同） */
+export interface ShortReview {
+  verdict?: 'pass' | 'revise' | string;
+  overall_score?: number;
+  three_lines?: ShortReviewIssue | null;
+  information_gap?: ShortReviewIssue | null;
+  ending?: ShortReviewIssue | null;
+  segment_notes?: { seg_index?: number; issue?: string; suggestion?: string }[] | null;
+  summary?: string;
+}
+
+/** 段行（短篇分段写作的一等公民；章正文 = 各段拼接的合并缓存） */
+export interface ChapterSegmentRow {
+  id: number;
+  seg_index: number;
+  /** 段功能标签（如 铺垫/反转/收束，由结构图规划） */
+  function?: string | null;
+  /** 本段写作指令 */
+  instruction?: string | null;
+  /** 预算字数 */
+  words?: number | null;
+  content: string;
+  status: string;
+  word_count: number;
+}
+
+export interface ChapterSegments {
+  chapter_id: number;
+  chapter_status: string;
+  word_count: number;
+  segments: ChapterSegmentRow[];
 }
 
 export interface NavNeighbor {
@@ -204,6 +264,47 @@ export interface UserPreferences {
     narrative_pov: string;
     target_word_count: number;
   };
+}
+
+// ===== 用户级模型通道（每用户一份，存 user.settings） =====
+
+/** 记忆向量（Embedding）通道：mode 决定本地/API 优先级 */
+export interface EmbeddingConfig {
+  model: string;
+  base_url: string;
+  api_key_configured: boolean;
+  mode: 'local_first' | 'api_first' | 'api_only' | string;
+}
+
+/** 润色/图像场景通道。GET 不回显 key（只给 api_key_configured），PUT 时 key 传「•••••」=保留已存值 */
+export interface SceneChannelConfig {
+  base_url: string;
+  model: string;
+  api_key_configured: boolean;
+  /** 仅 rewrite-config 返回：该通道是否配置过任意字段 */
+  configured?: boolean;
+  /** 仅 image-config 返回：图像通道开关 */
+  enabled?: boolean;
+}
+
+/** 重建向量索引进度（全库/单用户共用同一个后台任务与状态） */
+export interface EmbeddingRebuildStatus {
+  running?: boolean;
+  status?: string;
+  total?: number;
+  done?: number;
+  failed?: number;
+  error?: string;
+  started_at?: string | null;
+  finished_at?: string | null;
+}
+
+/** 书架横幅今日统计（北京时间切日；字数为所涉章节当前字数的近似口径） */
+export interface BooksToday {
+  books: number;
+  chapters: number;
+  words: number;
+  archived_count: number;
 }
 
 export interface WorldItem {
@@ -842,6 +943,19 @@ export class Api {
     });
   }
 
+  /** 编辑短篇故事卡（八字段整卡替换，存 project.settings.story_card；结局先行闸门读 ending 字段） */
+  updateStoryCard(id: number, storyCard: StoryCard) {
+    return this.req<{ ok: boolean }>(`/api/projects/${id}/story-card`, {
+      method: 'PUT',
+      body: JSON.stringify({ story_card: storyCard }),
+    });
+  }
+
+  /** 书架横幅今日统计（今日有正文变化的书数/章数/字数 + 归档计数） */
+  getBooksToday() {
+    return this.req<BooksToday>('/api/books/today');
+  }
+
   // ===== 投稿记录（书架筛选与投稿管理用；一条 = 一个平台一次投稿） =====
   getSubmissions(projectId: number) {
     return this.req<{ submissions: SubmissionRow[] }>(`/api/projects/${projectId}/submissions`);
@@ -910,6 +1024,60 @@ export class Api {
 
   getChapterNav(projectId: number, chapterId: number) {
     return this.req<ChapterNav>(`/api/projects/${projectId}/chapters/${chapterId}/navigation`);
+  }
+
+  // ===== 短篇段级流水线（story_kind=short/single；章正文=各段拼接，整篇直写会清空段行） =====
+  /** 段行列表（segments 为空数组 = 本章未分段，走整章流程） */
+  getChapterSegments(projectId: number, chapterId: number) {
+    return this.req<ChapterSegments>(`/api/projects/${projectId}/chapters/${chapterId}/segments`);
+  }
+
+  /** 手动编辑单段正文：只改本段，章合并缓存自动重算并记版本账 */
+  updateChapterSegment(projectId: number, chapterId: number, segIndex: number, content: string) {
+    return this.req<{ ok: boolean; seg_index: number; word_count: number }>(`/api/projects/${projectId}/chapters/${chapterId}/segments/${segIndex}`, {
+      method: 'PUT',
+      body: JSON.stringify({ content }),
+    });
+  }
+
+  /** 段级生成（按序约束：前序段须已完成） */
+  generateSegmentAsync(projectId: number, chapterId: number, segIndex: number, userInstructions = '') {
+    return this.req<{ task_id: number; chapter_id: number; segment_index: number }>(`/api/projects/${projectId}/chapters/${chapterId}/segments/${segIndex}/generate-async`, {
+      method: 'POST',
+      body: JSON.stringify(userInstructions ? { user_instructions: userInstructions } : {}),
+    });
+  }
+
+  /** 段级重写 v2：任意已完成段可重写，中段重写带后段开头咬合锚点；chain=连锁重写后续段 */
+  rewriteSegmentAsync(projectId: number, chapterId: number, segIndex: number, opts: { chain?: boolean; user_instructions?: string } = {}) {
+    return this.req<{ task_id: number; chapter_id: number; segment_index: number }>(`/api/projects/${projectId}/chapters/${chapterId}/segments/${segIndex}/rewrite-async`, {
+      method: 'POST',
+      body: JSON.stringify(opts),
+    });
+  }
+
+  /** 段级润色：只润色指定段（skill: ai_denoising/humanize_pro），完成后章合并缓存自动重算 */
+  polishSegmentAsync(projectId: number, chapterId: number, segIndex: number, skill: 'ai_denoising' | 'humanize_pro', userInstructions = '') {
+    return this.req<{ task_id: number; seg_index: number }>(`/api/projects/${projectId}/chapters/${chapterId}/segments/${segIndex}/polish-async`, {
+      method: 'POST',
+      body: JSON.stringify({ skill, user_instructions: userInstructions }),
+    });
+  }
+
+  // ===== 短篇审稿（三行留人/信息差账本/结尾回甘） =====
+  /** 单章整篇审稿（异步任务，结果存 chapter.short_review，重新拉章节可见） */
+  shortReviewAsync(projectId: number, chapterId: number) {
+    return this.req<{ task_id: number }>(`/api/projects/${projectId}/chapters/${chapterId}/short-review-async`, { method: 'POST' });
+  }
+
+  /** 多章短篇全书跨章通审（异步任务，结果存 project.settings.short_review_book） */
+  shortReviewBookAsync(projectId: number) {
+    return this.req<{ task_id: number }>(`/api/projects/${projectId}/short-review-book-async`, { method: 'POST' });
+  }
+
+  /** 读取多章短篇全书审稿结果（null=还没审过） */
+  getShortReviewBook(projectId: number) {
+    return this.req<{ short_review_book: ShortReview | null }>(`/api/projects/${projectId}/short-review-book`);
   }
 
   getOutlines(projectId: number) {
@@ -1746,6 +1914,61 @@ export class Api {
     return this.req<AiModelConfig[]>('/api/ai-models');
   }
 
+  // ===== 用户级模型通道（记忆向量 / 润色 / 图像，每用户一份） =====
+  getEmbeddingConfig() {
+    return this.req<EmbeddingConfig>('/api/ai-models/embedding-config');
+  }
+
+  /** 保存 Embedding 通道。api_key 传「•••••」=保留已存值；mode: local_first/api_first/api_only */
+  updateEmbeddingConfig(body: { model: string; base_url: string; api_key: string; mode: string }) {
+    return this.req<{ ok: boolean }>('/api/ai-models/embedding-config', {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    });
+  }
+
+  /** 用户级自助重建记忆向量索引（用自己的通道，异步后台执行） */
+  rebuildEmbeddingIndex() {
+    return this.req<{ ok: boolean; message?: string }>('/api/ai-models/embedding-config/rebuild', { method: 'POST' });
+  }
+
+  getEmbeddingRebuildStatus() {
+    return this.req<EmbeddingRebuildStatus>('/api/ai-models/embedding-config/rebuild-status');
+  }
+
+  /** 场景通道配置，channel: rewrite（润色）/ image（图像） */
+  getSceneChannelConfig(channel: 'rewrite' | 'image') {
+    return this.req<SceneChannelConfig>(`/api/ai-models/${channel}-config`);
+  }
+
+  updateSceneChannelConfig(channel: 'rewrite' | 'image', body: { base_url: string; api_key: string; model: string; enabled?: boolean }) {
+    return this.req<{ ok: boolean }>(`/api/ai-models/${channel}-config`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    });
+  }
+
+  /** 场景通道远端模型列表（缓存优先；跟随主接口未覆盖 URL 的卡请用 /ai-models 默认档） */
+  getSceneRemoteModels(channel: 'rewrite' | 'image' | 'embedding') {
+    return this.req<{ models: string[]; cached?: boolean }>(`/api/ai-models/scene-remote-models?channel=${channel}`);
+  }
+
+  /** 手动刷新场景通道模型缓存（现拉远端并落缓存） */
+  refreshSceneModels(channel: 'rewrite' | 'image' | 'embedding') {
+    return this.req<{ models: string[] }>(`/api/ai-models/scene-refresh`, {
+      method: 'POST',
+      body: JSON.stringify({ channel }),
+    });
+  }
+
+  /** 测试 Embedding 连通性。use_saved=true 时空字段从已保存的用户级通道取值 */
+  testEmbedding(body: { base_url?: string; api_key?: string; embedding_model?: string; use_saved?: boolean }) {
+    return this.req<Record<string, unknown>>('/api/ai-models/test-embedding', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
   // ===== 角色关系 =====
   listRelations(projectId: number) {
     return this.req<CharacterRelation[]>(`/api/projects/${projectId}/relations`);
@@ -1782,7 +2005,20 @@ export class Api {
     });
   }
 
+  /** 直接把外部图床地址设为封面（http(s) 开头，不落盘本地） */
+  setCoverUrl(projectId: number, url: string) {
+    return this.req<{ ok: boolean; cover_url: string }>(`/api/projects/${projectId}/cover/url`, {
+      method: 'POST',
+      body: JSON.stringify({ url }),
+    });
+  }
+
   coverUrl(projectId: number) {
     return `${this.baseUrl}/api/projects/${projectId}/cover/image`;
+  }
+
+  /** 封面缩略图（320px JPEG，书架列表用；缺失时服务端懒生成） */
+  coverThumbUrl(projectId: number) {
+    return `${this.baseUrl}/api/projects/${projectId}/cover/thumb`;
   }
 }

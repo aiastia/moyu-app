@@ -12,14 +12,13 @@ import { BlueprintPanel } from '@/components/BlueprintPanel';
 import { AutoWriteSheet } from '@/components/AutoWriteSheet';
 import { CoverSheet } from '@/components/CoverSheet';
 import { CoverArt } from '@/components/CoverArt';
+import { ShortReviewView } from '@/components/ShortReviewView';
 import { PendingEntitiesCard } from '@/components/PendingEntitiesCard';
-import type { ChapterRow, OutlineItem, ProjectDetail, WritingStyleItem } from '@/lib/api';
+import type { ChapterRow, OutlineItem, ProjectDetail, ShortReview, StoryCard, WritingStyleItem } from '@/lib/api';
 import { ApiError } from '@/lib/api';
 import { friendlyError, loadLastRead, useAuth } from '@/lib/auth';
 import { fmtDate, fmtPercent, fmtRelative, fmtWords, STORY_KIND_LABEL } from '@/lib/format';
 import { C, R, SP } from '@/lib/theme';
-
-type TabKey = 'chapters' | 'outlines' | 'blueprint' | 'characters' | 'world' | 'foreshadow' | 'about';
 
 /** 大纲场景（服务端 scenes 数组的单条），编辑表单里的可变形态 */
 type OutlineSceneEdit = { scene_title: string; scene_desc: string; emotion: string };
@@ -42,6 +41,7 @@ function toNameList(raw: unknown): string[] {
   return raw.map((x) => (typeof x === 'string' ? x : typeof x === 'number' ? String(x) : ((x as Record<string, unknown>)?.name as string) ?? '')).filter(Boolean);
 }
 
+/** 长篇全量 Tab；短篇家族按网页端口径裁剪（见 tabsForKind）：single 只留 章节/概况，short 隐蓝图 */
 const TABS = [
   { key: 'chapters', label: '章节' },
   { key: 'outlines', label: '大纲' },
@@ -51,6 +51,17 @@ const TABS = [
   { key: 'foreshadow', label: '伏笔' },
   { key: 'about', label: '概况' },
 ] as const;
+
+type TabKey = (typeof TABS)[number]['key'];
+
+/** 按篇幅模式出 Tab（对齐网页端 useNavigation 三模式裁剪）：
+ *  single=单章成篇不需要大纲/蓝图/角色/世界/伏笔（结构在故事卡+分段里）；
+ *  short=多章短篇保留大纲/角色/世界/伏笔，蓝图是长篇设施不出现。 */
+function tabsForKind(kind: string): { key: TabKey; label: string }[] {
+  if (kind === 'single') return TABS.filter((t) => t.key === 'chapters' || t.key === 'about').map((t) => ({ ...t }));
+  if (kind === 'short') return TABS.filter((t) => t.key !== 'blueprint').map((t) => ({ ...t }));
+  return TABS.map((t) => ({ ...t }));
+}
 
 /** 叙事视角/目标平台下拉：固定选项 + 当前值不在清单内时追加（兼容历史自定义值） */
 function withCurrent(options: { value: string; label: string }[], current?: string | null) {
@@ -119,6 +130,13 @@ export default function ProjectScreen() {
   const [styleList, setStyleList] = useState<WritingStyleItem[] | null>(null);
   const [styleChoice, setStyleChoice] = useState('');
   const [styleApplying, setStyleApplying] = useState(false);
+  /** 短篇故事卡弹窗（八字段编辑；null=关闭） */
+  const [cardDraft, setCardDraft] = useState<StoryCard | null>(null);
+  const [cardSaving, setCardSaving] = useState(false);
+  /** 多章短篇全书审稿弹窗（undefined=加载中，null=还没审过） */
+  const [bookReviewOpen, setBookReviewOpen] = useState(false);
+  const [bookReview, setBookReview] = useState<ShortReview | null | undefined>(undefined);
+  const [bookReviewBusy, setBookReviewBusy] = useState(false);
 
   const guard = useCallback(
     async (e: unknown) => {
@@ -382,6 +400,13 @@ export default function ProjectScreen() {
   /** 1→N 卷→章模式：大纲行是「卷」，点开还要看卷下展开的子章节 */
   const oneToMany = project?.outline_mode === 'one_to_many';
 
+  /** 篇幅模式（网页端 useProjectMode 同款三值）：决定 Tab 裁剪与一键连写入口 */
+  const kind = project?.story_kind ?? 'long';
+  const isSingle = kind === 'single';
+  const tabs = useMemo(() => tabsForKind(kind), [kind]);
+  /** 当前 tab 可能被模式裁剪掉（项目加载后才知道 kind，如 single 无大纲）——派生回落到章节，不走 effect */
+  const activeTab = tabs.some((t) => t.key === tab) ? tab : 'chapters';
+
   /** 打开大纲详情；1→N 模式同时拉取卷下子章节（补上章列表里的字数等展示字段） */
   const openOutlineDetail = (o: OutlineItem) => {
     setOutlineDetail(o);
@@ -481,6 +506,55 @@ export default function ProjectScreen() {
       })
       .catch((e) => toast(friendlyError(e)))
       .finally(() => setStyleApplying(false));
+  };
+
+  /** 短篇故事卡：打开编辑弹窗（八字段整卡替换） */
+  const openStoryCard = () => {
+    setCardDraft({ ...(project?.story_card ?? {}) });
+  };
+
+  const saveStoryCard = () => {
+    if (!api || !cardDraft || cardSaving) return;
+    setCardSaving(true);
+    api
+      .updateStoryCard(projectId, cardDraft)
+      .then(() => {
+        setProject((p) => (p ? { ...p, story_card: cardDraft } : p));
+        setCardDraft(null);
+        toast('故事卡已保存');
+      })
+      .catch((e) => toast(friendlyError(e)))
+      .finally(() => setCardSaving(false));
+  };
+
+  /** 多章短篇全书审稿：读结果（无则可现场发起审稿任务） */
+  const openBookReview = () => {
+    setBookReviewOpen(true);
+    setBookReview(undefined);
+    api
+      ?.getShortReviewBook(projectId)
+      .then((r) => setBookReview(r.short_review_book ?? null))
+      .catch((e) => {
+        setBookReview(null);
+        toast(friendlyError(e));
+      });
+  };
+
+  const submitBookReview = () => {
+    if (!api || bookReviewBusy) return;
+    confirm({
+      title: '全书审稿',
+      message: 'AI 跨章通审整本短篇（三行留人/信息差/回甘），异步任务，完成后回来点开查看。',
+      confirmText: '开始审稿',
+      onConfirm: () => {
+        setBookReviewBusy(true);
+        api
+          .shortReviewBookAsync(projectId)
+          .then(() => toast('已提交全书审稿任务，可在「任务」页看进度'))
+          .catch((e) => toast(friendlyError(e)))
+          .finally(() => setBookReviewBusy(false));
+      },
+    });
   };
 
   /** 章节列表元素缓存：打开弹窗/Toast/切分栏等界面态变化不重渲整张章列表 */
@@ -628,22 +702,27 @@ export default function ProjectScreen() {
               </Pressable>
             ) : null}
 
-            <SegmentedTabs tabs={TABS.map((t) => ({ key: t.key, label: t.label }))} active={tab} onChange={(k) => setTab(k as TabKey)} />
+            <SegmentedTabs tabs={tabs} active={activeTab} onChange={(k) => setTab(k as TabKey)} />
 
-            {tab === 'chapters' ? (
+            {activeTab === 'chapters' ? (
               <>
-                <AutoWriteSheet projectId={projectId} />
+                {/* 单章成篇没有一键连写（网页端同口径）：动笔路径 = 故事卡 → 章节按段生成 */}
+                {!isSingle ? <AutoWriteSheet projectId={projectId} /> : null}
                 {chapters === null ? (
                   <Skeleton count={6} height={64} />
                 ) : chapters.length === 0 ? (
-                  <EmptyState icon="list-outline" title="还没有章节" sub="点上方「一键连写」自动生成大纲和正文，或先去大纲分栏补大纲" />
+                  isSingle ? (
+                    <EmptyState icon="list-outline" title="还没有正文" sub="先去「概况」填好故事卡，再点章节生成——AI 按结构段一篇写到底" />
+                  ) : (
+                    <EmptyState icon="list-outline" title="还没有章节" sub="点上方「一键连写」自动生成大纲和正文，或先去大纲分栏补大纲" />
+                  )
                 ) : (
                   <View style={{ gap: 8 }}>{chapterList}</View>
                 )}
               </>
             ) : null}
 
-            {tab === 'outlines' ? (
+            {activeTab === 'outlines' ? (
               outlines === null ? (
                 <Skeleton count={5} height={84} />
               ) : outlines.length === 0 ? (
@@ -740,17 +819,17 @@ export default function ProjectScreen() {
               )
             ) : null}
 
-            {tab === 'blueprint' ? <BlueprintPanel projectId={projectId} /> : null}
+            {activeTab === 'blueprint' ? <BlueprintPanel projectId={projectId} /> : null}
 
-            {tab === 'characters' ? (
+            {activeTab === 'characters' ? (
               <CharactersPanel projectId={projectId} />
             ) : null}
 
-            {tab === 'world' ? <EntitiesHub projectId={projectId} /> : null}
+            {activeTab === 'world' ? <EntitiesHub projectId={projectId} /> : null}
 
-            {tab === 'foreshadow' ? <ForeshadowsPanel projectId={projectId} /> : null}
+            {activeTab === 'foreshadow' ? <ForeshadowsPanel projectId={projectId} /> : null}
 
-            {tab === 'about' && project ? (
+            {activeTab === 'about' && project ? (
               <>
                 <CoverSheet
                   projectId={projectId}
@@ -852,6 +931,49 @@ export default function ProjectScreen() {
                     </Text>
                   </Pressable>
                 </View>
+                {/* 短篇家族专属：故事卡（结局先行闸门）与全书审稿 */}
+                {project.story_kind === 'short' || project.story_kind === 'single' ? (
+                  <View style={{ flexDirection: 'row', gap: 10 }}>
+                    <Pressable
+                      onPress={openStoryCard}
+                      style={({ pressed }) => ({
+                        flex: 1,
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: 6,
+                        height: 42,
+                        borderRadius: R.m,
+                        backgroundColor: pressed ? '#20304A' : C.blueSoft,
+                        borderWidth: 1,
+                        borderColor: 'rgba(106,166,232,0.4)',
+                      })}
+                    >
+                      <Ionicons name="library-outline" size={15} color={C.blue} />
+                      <Text style={{ color: C.blue, fontSize: 13, fontWeight: '700' }}>故事卡</Text>
+                    </Pressable>
+                    {project.story_kind === 'short' ? (
+                      <Pressable
+                        onPress={openBookReview}
+                        style={({ pressed }) => ({
+                          flex: 1,
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: 6,
+                          height: 42,
+                          borderRadius: R.m,
+                          backgroundColor: pressed ? '#173325' : C.greenSoft,
+                          borderWidth: 1,
+                          borderColor: 'rgba(95,191,143,0.4)',
+                        })}
+                      >
+                        <Ionicons name="reader-outline" size={15} color={C.green} />
+                        <Text style={{ color: C.green, fontSize: 13, fontWeight: '700' }}>全书审稿</Text>
+                      </Pressable>
+                    ) : null}
+                  </View>
+                ) : null}
                 <View style={{ backgroundColor: C.card, borderRadius: R.l, borderWidth: 1, borderColor: C.borderSoft, padding: SP.l, gap: 13 }}>
                 {project.synopsis ? <Text style={{ color: C.text2, fontSize: 13, lineHeight: 22 }}>{project.synopsis}</Text> : null}
                 <View style={{ height: 1, backgroundColor: C.borderSoft }} />
@@ -1251,6 +1373,74 @@ export default function ProjectScreen() {
               <Text style={{ color: '#1A1206', fontSize: 15, fontWeight: '800' }}>{styleApplying ? '绑定中…' : '绑定到本书'}</Text>
             </Pressable>
             <Text style={{ color: C.text3, fontSize: 11, lineHeight: 16, textAlign: 'center' }}>风格库在「设置 → 写作风格」里管理</Text>
+          </>
+        )}
+      </SheetModal>
+
+      {/* 短篇故事卡：八字段整卡编辑（结局为空时网页工作台禁止生成——结局先行） */}
+      <SheetModal visible={cardDraft !== null} onClose={() => setCardDraft(null)} title="故事卡">
+        {cardDraft ? (
+          <>
+            <Text style={{ color: C.text3, fontSize: 12, lineHeight: 18 }}>
+              把卖点、反转和结局想清楚再动笔——正文生成会按这张卡对账。
+            </Text>
+            {(
+              [
+                ['premise', '卖点（一句话）', '为什么这个故事值得看'],
+                ['hook', '开场钩子', '前三行抛出什么悬念/反差'],
+                ['protagonist', '主角', '谁的眼睛看故事'],
+                ['goal', '目标', '主角想要什么'],
+                ['conflict', '冲突与阻力', '什么拦着主角'],
+                ['antagonist', '对手', '人或环境都可以'],
+                ['twist', '关键反转', '读者相信什么、真相是什么、哪一刻揭穿'],
+                ['ending', '结局（结局先行）', '以什么收束模式结尾'],
+              ] as [keyof StoryCard, string, string][]
+            ).map(([key, label, hint]) => (
+              <View key={String(key)} style={{ gap: 6 }}>
+                <FieldLabel>{label}</FieldLabel>
+                <Input
+                  value={typeof cardDraft[key] === 'string' ? (cardDraft[key] as string) : ''}
+                  onChangeText={(v) => setCardDraft((f) => (f ? { ...f, [key]: v } : f))}
+                  placeholder={hint}
+                  multiline={key === 'twist' || key === 'ending'}
+                  height={key === 'twist' || key === 'ending' ? 72 : undefined}
+                />
+              </View>
+            ))}
+            <Pressable
+              onPress={saveStoryCard}
+              disabled={cardSaving}
+              style={{ height: 46, borderRadius: R.m, backgroundColor: C.gold, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 8, marginTop: 4 }}
+            >
+              {cardSaving ? <ActivityIndicator size="small" color="#1A1206" /> : <Ionicons name="checkmark" size={17} color="#1A1206" />}
+              <Text style={{ color: '#1A1206', fontSize: 15, fontWeight: '800' }}>{cardSaving ? '保存中…' : '保存故事卡'}</Text>
+            </Pressable>
+          </>
+        ) : null}
+      </SheetModal>
+
+      {/* 多章短篇全书审稿：结果查看 + 现场发起 */}
+      <SheetModal visible={bookReviewOpen} onClose={() => setBookReviewOpen(false)} title="全书审稿（短篇）">
+        {bookReview === undefined ? (
+          <ActivityIndicator color={C.gold} />
+        ) : (
+          <>
+            {bookReview ? (
+              <ShortReviewView review={bookReview} />
+            ) : (
+              <Text style={{ color: C.text3, fontSize: 12.5, lineHeight: 19, textAlign: 'center', paddingVertical: 8 }}>
+                还没有全书审稿结果。
+              </Text>
+            )}
+            <Pressable
+              onPress={submitBookReview}
+              disabled={bookReviewBusy}
+              style={{ height: 46, borderRadius: R.m, backgroundColor: C.gold, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 8, opacity: bookReviewBusy ? 0.7 : 1 }}
+            >
+              {bookReviewBusy ? <ActivityIndicator size="small" color="#1A1206" /> : <Ionicons name="sparkles" size={16} color="#1A1206" />}
+              <Text style={{ color: '#1A1206', fontSize: 15, fontWeight: '800' }}>{bookReview ? '重新审稿' : '开始全书审稿'}</Text>
+            </Pressable>
+            <Text style={{ color: C.text3, fontSize: 11, lineHeight: 16, textAlign: 'center' }}>AI 跨章通审整本（三行留人/信息差/回甘），任务页看进度</Text>
           </>
         )}
       </SheetModal>

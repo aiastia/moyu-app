@@ -13,7 +13,8 @@ const GENRES = ['玄幻', '仙侠', '都市', '言情', '科幻', '悬疑', '历
 const POVS = NARRATIVE_POV_OPTIONS;
 const KINDS = [
   { key: 'long', label: '长篇连载' },
-  { key: 'short', label: '短篇单章' },
+  { key: 'short', label: '多章短篇' },
+  { key: 'single', label: '单章成篇' },
 ];
 
 function OptionChips({ options, value, onChange }: { options: string[]; value: string; onChange: (v: string) => void }) {

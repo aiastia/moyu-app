@@ -133,6 +133,33 @@ export function CoverSheet({ projectId, initialPrompt, onCoverChanged }: { proje
     }
   };
 
+  /** 外链封面地址（Input 受控值） */
+  const [url, setUrl] = useState('');
+
+  /** 直接把外部图床地址设为封面（不落盘本地，http(s) 开头） */
+  const applyUrl = async () => {
+    if (!api || busy) return;
+    if (!/^https?:\/\/\S+$/i.test(url.trim())) {
+      toast('请填写 http(s) 开头的图片地址');
+      return;
+    }
+    setBusy(true);
+    setPhase('设置外链封面…');
+    try {
+      await api.setCoverUrl(projectId, url.trim());
+      clearAuthImageCache();
+      onCoverChanged();
+      setOpen(false);
+      setUrl('');
+      toast('封面已更新（外链）');
+    } catch (e) {
+      toast(friendlyError(e));
+    } finally {
+      setBusy(false);
+      setPhase('');
+    }
+  };
+
   return (
     <View>
       {toastNode}
@@ -233,6 +260,18 @@ export function CoverSheet({ projectId, initialPrompt, onCoverChanged }: { proje
           <Ionicons name="cloud-upload-outline" size={16} color={C.text2} />
           <Text style={{ color: C.text2, fontSize: 14, fontWeight: '600' }}>上传本地封面（自己做的图）</Text>
         </Pressable>
+
+        <View style={{ gap: 7 }}>
+          <FieldLabel>或用外链封面（图床地址）</FieldLabel>
+          <Input value={url} onChangeText={setUrl} placeholder="https://…（http(s) 图片地址）" autoCapitalize="none" autoCorrect={false} />
+          <Pressable
+            onPress={applyUrl}
+            disabled={busy}
+            style={{ height: 40, borderRadius: R.m, backgroundColor: C.card2, borderWidth: 1, borderColor: C.border, alignItems: 'center', justifyContent: 'center' }}
+          >
+            <Text style={{ color: C.text2, fontSize: 13.5, fontWeight: '600' }}>设为封面</Text>
+          </Pressable>
+        </View>
 
         <Text style={{ color: C.text3, fontSize: 11, lineHeight: 16, textAlign: 'center' }}>
           AI 出图需要在服务端配置图像生成 API；上传本地封面支持 PNG/JPG/WebP（≤15MB）
