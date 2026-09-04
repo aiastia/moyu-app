@@ -57,6 +57,22 @@ export function fmtDate(iso?: string | null): string {
 /** story_kind 三值（与后端值域一一对应）：long=长篇连载 / short=多章短篇 / single=单章成篇 */
 export const STORY_KIND_LABEL: Record<string, string> = { long: '长篇', short: '多章短篇', single: '单章短篇' };
 
+/** 书籍连载状态四值（与网页端 bookStatus.ts / 后端 normalize_status 白名单一致；archived 是归档视图分类不在其中） */
+export const BOOK_STATUS_LABEL: Record<string, string> = { active: '连载中', completed: '已完结', paused: '暂更', abandoned: '太监' };
+
+/** 连载状态归一：未知值兜底连载中（默认态） */
+export function normalizeBookStatus(s?: string | null): string {
+  const v = (s || '').trim().toLowerCase();
+  return v in BOOK_STATUS_LABEL ? v : 'active';
+}
+
+/** 状态优先排序权重（书架排序用）：连载→暂更→太监→完结，未知值排最后；
+ *  归档书传 pre_archive_status 即按归档前状态归组 */
+export function statusSortKey(s?: string | null): number {
+  const order: Record<string, number> = { active: 0, paused: 1, abandoned: 2, completed: 3 };
+  return order[normalizeBookStatus(s)] ?? 9;
+}
+
 export const STATUS_LABEL: Record<string, string> = {
   pending: '排队中',
   running: '运行中',

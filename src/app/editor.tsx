@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Chip, FieldLabel, Input, SelectField, SheetModal, useConfirm, useToast } from '@/components/ui';
+import { Chip, FieldLabel, Input, SelectField, SheetModal, Toggle, useConfirm, useToast } from '@/components/ui';
 import { ShortReviewView } from '@/components/ShortReviewView';
 import type { ChapterFull, ChapterSegmentRow, RegenTask } from '@/lib/api';
 import { ApiError } from '@/lib/api';
@@ -267,6 +267,7 @@ export default function EditorScreen() {
   const [polishNote, setPolishNote] = useState('');
   const [polishBusy, setPolishBusy] = useState(false);
   const [regenNote, setRegenNote] = useState('');
+  const [regenNextOpening, setRegenNextOpening] = useState(false);
   const [regenBusy, setRegenBusy] = useState(false);
   const [regenList, setRegenList] = useState<RegenTask[] | null>(null);
   const [applyBusy, setApplyBusy] = useState(false);
@@ -402,10 +403,11 @@ export default function EditorScreen() {
     }
     setRegenBusy(true);
     api
-      .regenerateChapterAsync(projectId, chapterId, regenNote.trim())
+      .regenerateChapterAsync(projectId, chapterId, regenNote.trim(), true, regenNextOpening)
       .then(() => {
         setToolPage(null);
         setRegenNote('');
+        setRegenNextOpening(false);
         toast('已提交重写任务：只产草稿不覆盖正文，完成后在「重写历史」里对比应用');
       })
       .catch((e) => toast(friendlyError(e)))
@@ -909,6 +911,12 @@ export default function EditorScreen() {
               <FieldLabel>重写要求</FieldLabel>
               <Input value={regenNote} onChangeText={setRegenNote} placeholder="如：加强打斗的紧张感、删掉回忆段落" multiline height={100} />
             </View>
+            <Toggle
+              label="衔接下一章开头"
+              hint="下一章已有正文时自动注入其开头 500 字，重写中间章不再与后文矛盾"
+              value={regenNextOpening}
+              onChange={setRegenNextOpening}
+            />
             <Pressable onPress={submitRegen} disabled={regenBusy} style={{ height: 46, borderRadius: R.m, backgroundColor: C.gold, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 8, opacity: regenBusy ? 0.7 : 1 }}>
               {regenBusy ? <ActivityIndicator size="small" color="#1A1206" /> : <Ionicons name="swap-horizontal-outline" size={16} color="#1A1206" />}
               <Text style={{ color: '#1A1206', fontSize: 15, fontWeight: '800' }}>{regenBusy ? '提交中…' : '提交重写'}</Text>

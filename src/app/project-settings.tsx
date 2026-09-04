@@ -5,7 +5,7 @@ import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-nati
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Input, ScreenHeader, StepperRow, Toggle, useToast } from '@/components/ui';
-import type { BestofOptions, FinalRoundCacheOptions, OutlineOptions, PromptModules, ThinkingModes } from '@/lib/api';
+import type { BestofOptions, CapabilityModule, FinalRoundCacheOptions, OutlineOptions, PromptModules, ThinkingModes } from '@/lib/api';
 import { ApiError } from '@/lib/api';
 import { friendlyError, useAuth } from '@/lib/auth';
 import { C, R, SP } from '@/lib/theme';
@@ -47,6 +47,7 @@ export default function ProjectSettingsScreen() {
   const [autoRewrite, setAutoRewrite] = useState<{ auto_rewrite_low_score: boolean; auto_rewrite_threshold: number } | null>(null);
   const [finalRound, setFinalRound] = useState<FinalRoundCacheOptions | null>(null);
   const [modules, setModules] = useState<PromptModules | null>(null);
+  const [capModules, setCapModules] = useState<CapabilityModule[] | null>(null);
   const [thinking, setThinking] = useState<ThinkingModes | null>(null);
   const [englishExclude, setEnglishExclude] = useState<string | null>(null);
   const [savingExclude, setSavingExclude] = useState(false);
@@ -76,6 +77,7 @@ export default function ProjectSettingsScreen() {
       api.getAutoRewrite(projectId).then(setAutoRewrite).catch(() => undefined),
       api.getFinalRoundCache(projectId).then(setFinalRound).catch(() => undefined),
       api.getPromptModules(projectId).then(setModules).catch(() => undefined),
+      api.getCapabilityModules(projectId).then((r) => setCapModules(r.modules ?? [])).catch(() => undefined),
       api.getThinkingModes(projectId).then((r) => setThinking(r.modes)).catch(() => undefined),
       api.getEnglishExclude(projectId).then((r) => setEnglishExclude(r.english_scan_exclude ?? '')).catch(() => setEnglishExclude('')),
       api.getExtraWritingRules(projectId).then((r) => setExtraRules(r.extra_writing_rules ?? '')).catch(() => setExtraRules('')),
@@ -276,6 +278,27 @@ export default function ProjectSettingsScreen() {
                   put(
                     () => api!.updatePromptModules(projectId, next),
                     () => setModules(prev),
+                  );
+                }}
+              />
+            ))}
+          </Card>
+        ) : null}
+
+        {capModules && capModules.length > 0 ? (
+          <Card title="能力模块" hint="生成主链上的插件能力，改动立即生效；某环节出问题时可单独关停（如伏笔提醒清单脏了先关、先连写）">
+            {capModules.map((m) => (
+              <Toggle
+                key={m.name}
+                label={m.enabled !== m.default_enabled ? `${m.title}（已改默认）` : m.title}
+                hint={m.desc}
+                value={m.enabled}
+                onChange={(v) => {
+                  const prev = capModules;
+                  setCapModules(capModules.map((x) => (x.name === m.name ? { ...x, enabled: v } : x)));
+                  put(
+                    () => api!.updateCapabilityModule(projectId, m.name, v),
+                    () => setCapModules(prev),
                   );
                 }}
               />

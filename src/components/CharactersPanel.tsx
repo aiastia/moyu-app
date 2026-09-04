@@ -5,9 +5,10 @@ import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 
 import { Chip, EmptyState, FieldLabel, Input, MultiSelectField, SelectField, SheetModal, Skeleton, useConfirm, useToast } from '@/components/ui';
 import { PortraitSheet } from '@/components/PortraitSheet';
-import type { CharacterBody, CharacterItem, CharacterRelation } from '@/lib/api';
+import type { CharacterBody, CharacterItem, CharacterOutfit, CharacterRelation } from '@/lib/api';
 import { ApiError, CHARACTER_STATUS_LABEL } from '@/lib/api';
 import { friendlyError, useAuth } from '@/lib/auth';
+import { pollTask } from '@/lib/tasks';
 import { C, R } from '@/lib/theme';
 
 const ROLES = ['主角', '男主', '女主', '大反派', '反派', '配角', '路人'];
@@ -64,7 +65,12 @@ const EMPTY_FORM: CharacterBody = {
   mental_state: '',
   status: 'alive',
   aliases: [],
+  outfits: [],
 };
+
+/** 编辑表单里的装扮行： AI 生成/手动填都归一为 {name, description}（与服务端 normalize_outfits 同构） */
+const toFormOutfits = (c: CharacterItem): CharacterOutfit[] =>
+  (c.outfits ?? []).filter((o) => o && typeof o.name === 'string').map((o) => ({ name: o.name ?? '', description: o.description ?? '' }));
 
 /** 角色面板：列表 + 手动新建/编辑/删除 + AI 批量生成 */
 export function CharactersPanel({ projectId }: { projectId: number }) {
@@ -82,8 +88,20 @@ export function CharactersPanel({ projectId }: { projectId: number }) {
   const [aiRole, setAiRole] = useState('');
   const [aiReq, setAiReq] = useState('');
   const [aiSubmitting, setAiSubmitting] = useState(false);
+  // AI 配装扮弹窗（编辑弹窗内发起，完成后装扮直接落库并同步回表单）
+  const [outfitAiOpen, setOutfitAiOpen] = useState(false);
+  const [outfitAiCount, setOutfitAiCount] = useState(3);
+  const [outfitAiReq, setOutfitAiReq] = useState('');
+  const [outfitAiBusy, setOutfitAiBusy] = useState(false);
+  const [outfitAiPhase, setOutfitAiPhase] = useState('');
 
   const set = (patch: Partial<CharacterBody>) => setForm((f) => ({ ...f, ...patch }));
+
+  /** 表单装扮行的增删改（整表替换语义：保存时随表单一并提交） */
+  const addOutfit = () => setForm((f) => ({ ...f, outfits: [...(f.outfits ?? []), { name: '', description: '' }] }));
+  const removeOutfit = (i: number) => setForm((f) => ({ ...f, outfits: (f.outfits ?? []).filter((_, j) => j !== i) }));
+  const setOutfitRow = (i: number, patch: Partial<CharacterOutfit>) =>
+    setForm((f) => ({ ...f, outfits: (f.outfits ?? []).map((o, j) => (j === i ? { ...o, ...patch } : o)) }));
 
   const load = useCallback(async () => {
     if (!api) return;
@@ -100,8 +118,11 @@ export function CharactersPanel({ projectId }: { projectId: number }) {
     }
   }, [api, projectId, logout, toast]);
 
+  // async 边界包裹：load 的 setState 都在异步续延里，直接调用会被 set-state-in-effect 规则判为同步写
   useEffect(() => {
-    load();
+    (async () => {
+      await load();
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
@@ -132,6 +153,7 @@ export function CharactersPanel({ projectId }: { projectId: number }) {
       mental_state: c.mental_state ?? '',
       status: c.status || 'alive',
       aliases: Array.isArray(c.aliases) ? c.aliases : [],
+      outfits: toFormOutfits(c),
     });
   };
 
@@ -149,6 +171,7 @@ export function CharactersPanel({ projectId }: { projectId: number }) {
       const body: CharacterBody = {
         ...form,
         name: form.name.trim(),
+        outfits: (form.outfits ?? []).filter((o) => o.name.trim() || o.description.trim()),
         ...(cur
           ? {
               main_career_id: cur.main_career_id ?? null,
@@ -200,6 +223,30 @@ export function CharactersPanel({ projectId }: { projectId: number }) {
       })
       .catch((e) => toast(friendlyError(e)))
       .finally(() => setAiSubmitting(false));
+  };
+
+  /** 提交 AI 配装扮（异步任务）：完成即落库（追加合并同名跳过），刷新列表并同步回编辑表单 */
+  const submitOutfitAi = async () => {
+    if (!api || !cur || outfitAiBusy) return;
+    setOutfitAiBusy(true);
+    try {
+      const r = await api.suggestOutfits(projectId, cur.id, outfitAiCount, outfitAiReq.trim());
+      const t = await pollTask(api, r.task_id, { onTick: (x) => setOutfitAiPhase(`AI 配装中 ${x.progress ?? 0}%`) });
+      const addedRaw = (t.result as { added?: unknown } | null | undefined)?.added;
+      const added = Array.isArray(addedRaw) ? addedRaw.length : null;
+      const list = await api.getCharacters(projectId);
+      setItems(list ?? []);
+      const fresh = (list ?? []).find((c) => c.id === cur.id);
+      if (fresh) setForm((f) => ({ ...f, outfits: toFormOutfits(fresh) }));
+      setOutfitAiOpen(false);
+      setOutfitAiReq('');
+      toast(added != null ? `已为「${cur.name}」新增 ${added} 套装扮` : '装扮已生成保存');
+    } catch (e) {
+      toast(friendlyError(e));
+    } finally {
+      setOutfitAiBusy(false);
+      setOutfitAiPhase('');
+    }
   };
 
   const cur = editing && editing !== 'new' ? editing : null;
@@ -277,6 +324,7 @@ export function CharactersPanel({ projectId }: { projectId: number }) {
                 <Text style={{ color: C.text, fontSize: 14.5, fontWeight: '800' }}>{c.name}</Text>
                 {c.role ? <Chip label={c.role} fg={rc.fg} bg={rc.bg} /> : null}
                 {c.gender ? <Chip label={c.gender} /> : null}
+                {(c.outfits?.length ?? 0) > 0 ? <Chip label={`${c.outfits!.length} 套装扮`} fg={C.purple} bg={C.purpleSoft} /> : null}
                 {dead ? <Chip label={CHARACTER_STATUS_LABEL[c.status!] ?? c.status!} fg={C.seal} bg={C.sealSoft} /> : null}
                 <View style={{ flex: 1 }} />
                 <Pressable
@@ -369,6 +417,60 @@ export function CharactersPanel({ projectId }: { projectId: number }) {
         <Input value={form.personality ?? ''} onChangeText={(v) => set({ personality: v })} placeholder="性格关键词" multiline height={80} />
         <FieldLabel>外貌</FieldLabel>
         <Input value={form.appearance ?? ''} onChangeText={(v) => set({ appearance: v })} placeholder="外貌特征" multiline height={80} />
+
+        <View style={{ gap: 8 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <FieldLabel>多套装扮（{form.outfits?.length ?? 0}）</FieldLabel>
+            <View style={{ flex: 1 }} />
+            {cur ? (
+              <Pressable
+                onPress={() => {
+                  setOutfitAiCount(3);
+                  setOutfitAiReq('');
+                  setOutfitAiOpen(true);
+                }}
+                hitSlop={6}
+              >
+                <Text style={{ color: C.blue, fontSize: 12, fontWeight: '700' }}>AI 配装</Text>
+              </Pressable>
+            ) : null}
+          </View>
+          {(form.outfits ?? []).map((o, i) => (
+            <View key={i} style={{ backgroundColor: C.card2, borderRadius: R.s, padding: 9, gap: 6 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <View style={{ flex: 1 }}>
+                  <Input value={o.name} onChangeText={(v) => setOutfitRow(i, { name: v })} placeholder="装扮名（如：冬季校服）" />
+                </View>
+                <Pressable onPress={() => removeOutfit(i)} hitSlop={8}>
+                  <Ionicons name="trash-outline" size={17} color={C.seal} />
+                </Pressable>
+              </View>
+              <Input value={o.description} onChangeText={(v) => setOutfitRow(i, { description: v })} placeholder="可绘制的外观描述（面料/颜色/配饰）" multiline height={56} />
+            </View>
+          ))}
+          <Pressable
+            onPress={addOutfit}
+            style={({ pressed }) => ({
+              height: 38,
+              borderRadius: R.m,
+              backgroundColor: pressed ? C.card2 : 'transparent',
+              borderWidth: 1,
+              borderColor: C.border,
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexDirection: 'row',
+              gap: 6,
+            })}
+          >
+            <Ionicons name="add" size={14} color={C.text2} />
+            <Text style={{ color: C.text2, fontSize: 13, fontWeight: '600' }}>添加一套装扮</Text>
+          </Pressable>
+          {(form.outfits?.length ?? 0) === 0 ? (
+            <Text style={{ color: C.text3, fontSize: 11, lineHeight: 16 }}>
+              立绘/封面出图时可按名选装；不设置则按档案外貌出图。 AI 配装会参考外貌与世界观看重名跳过。
+            </Text>
+          ) : null}
+        </View>
         <FieldLabel>说话风格</FieldLabel>
         <Input value={form.speech_style ?? ''} onChangeText={(v) => set({ speech_style: v })} placeholder="如：语速慢、爱用反问" />
         <FieldLabel>当前心理</FieldLabel>
@@ -411,7 +513,60 @@ export function CharactersPanel({ projectId }: { projectId: number }) {
         </View>
       </SheetModal>
 
+      {/* AI 配装扮（1-3 套，完成即自动保存落库） */}
+      <SheetModal visible={outfitAiOpen} onClose={() => !outfitAiBusy && setOutfitAiOpen(false)} title={`AI 配装扮 · ${cur?.name ?? ''}`}>
+        <Text style={{ color: C.text3, fontSize: 12, lineHeight: 18 }}>
+          参考角色外貌与本书世界观设计新装扮，完成即自动保存；与已有装扮同名的跳过不覆盖。
+        </Text>
+        <View style={{ gap: 9 }}>
+          <FieldLabel>生成套数</FieldLabel>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            {[1, 2, 3].map((n) => {
+              const on = outfitAiCount === n;
+              return (
+                <Pressable
+                  key={n}
+                  onPress={() => setOutfitAiCount(n)}
+                  style={{
+                    paddingHorizontal: 20,
+                    height: 38,
+                    borderRadius: 13,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    backgroundColor: on ? C.blueSoft : C.card2,
+                    borderWidth: 1,
+                    borderColor: on ? 'rgba(106,166,232,0.45)' : C.border,
+                  }}
+                >
+                  <Text style={{ color: on ? C.blue : C.text2, fontSize: 13.5, fontWeight: on ? '700' : '500' }}>{n} 套</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+        <View style={{ gap: 7 }}>
+          <FieldLabel>特别要求（可选）</FieldLabel>
+          <Input value={outfitAiReq} onChangeText={setOutfitAiReq} placeholder="如：配一套冬季便装 / 要有宗门制服感" multiline height={70} />
+        </View>
+        {outfitAiPhase ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: C.card2, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 9 }}>
+            <ActivityIndicator size="small" color={C.blue} />
+            <Text style={{ color: C.text2, fontSize: 12.5 }}>{outfitAiPhase}</Text>
+          </View>
+        ) : null}
+        <Pressable
+          onPress={submitOutfitAi}
+          disabled={outfitAiBusy}
+          style={{ height: 46, borderRadius: R.m, backgroundColor: C.blueSoft, borderWidth: 1, borderColor: 'rgba(106,166,232,0.45)', alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 8, opacity: outfitAiBusy ? 0.7 : 1 }}
+        >
+          {outfitAiBusy ? <ActivityIndicator size="small" color={C.blue} /> : <Ionicons name="sparkles" size={16} color={C.blue} />}
+          <Text style={{ color: C.blue, fontSize: 15, fontWeight: '800' }}>{outfitAiBusy ? '配装中…' : `设计 ${outfitAiCount} 套装扮`}</Text>
+        </Pressable>
+      </SheetModal>
+
+      {/* key=角色 id：换角色/重开整组件重挂载，状态初始化即角色当前值（配合 PortraitSheet 去 effect 重置） */}
       <PortraitSheet
+        key={portraitChar ? `portrait-${portraitChar.id}` : 'portrait-none'}
         projectId={projectId}
         character={portraitChar}
         visible={portraitChar !== null}

@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { ActivityIndicator, Image, Pressable, ScrollView, Text, View } from 'react-native';
 
 import { Chip, FieldLabel, Input, SheetModal, useConfirm, useToast } from '@/components/ui';
@@ -10,6 +10,7 @@ import { pollTask } from '@/lib/tasks';
 import { C, R } from '@/lib/theme';
 
 const STYLES = [
+  { key: 'auto', label: '自动·按题材' },
   { key: 'game_cg', label: '游戏CG' },
   { key: 'anime', label: '日系动漫' },
   { key: 'guofeng', label: '新国风' },
@@ -40,10 +41,12 @@ export function PortraitSheet({
   onUpdated: () => void;
 }) {
   const { api } = useAuth();
-  const [style, setStyle] = useState('game_cg');
+  const [style, setStyle] = useState('auto');
   const [view, setView] = useState('single');
   const [extra, setExtra] = useState('');
-  const [prompt, setPrompt] = useState('');
+  const [outfit, setOutfit] = useState('');
+  // 状态初始化即同步角色当前值：父组件给本组件按角色 id 加 key，换角色/重开即整组件重挂载（无 effect 重置）
+  const [prompt, setPrompt] = useState(character?.reference_prompt ?? '');
   const [busy, setBusy] = useState(false);
   const [phase, setPhase] = useState('');
   const [imgVersion, setImgVersion] = useState(0);
@@ -57,15 +60,7 @@ export function PortraitSheet({
     imgVersion,
   );
 
-  // 打开时同步角色最新提示词
-  useEffect(() => {
-    if (visible && character) {
-      setPrompt(character.reference_prompt ?? '');
-      setExtra('');
-      setPhase('');
-      setImgVersion(0);
-    }
-  }, [visible, character]);
+  const outfitNames = (character?.outfits ?? []).map((o) => o.name).filter(Boolean);
 
   const refreshChar = async (): Promise<CharacterItem | null> => {
     if (!api || !character) return null;
@@ -79,7 +74,7 @@ export function PortraitSheet({
     setBusy(true);
     setPhase('提示词生成中…');
     try {
-      const r = await api.portraitPromptAsync(projectId, character.id, { style, view, extra_requirements: extra });
+      const r = await api.portraitPromptAsync(projectId, character.id, { style, view, extra_requirements: extra, outfit });
       await pollTask(api, r.task_id, { onTick: (t) => setPhase(`提示词 ${t.progress ?? 0}%`) });
       const fresh = await refreshChar();
       setPrompt(fresh?.reference_prompt ?? '');
@@ -88,6 +83,25 @@ export function PortraitSheet({
       toast('提示词已生成，可编辑后出图');
     } catch (e) {
       setPhase('');
+      toast(friendlyError(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** 手写/编辑后的提示词直接落库（不调 AI 不出图），改天出图全链闭环 */
+  const savePrompt = async () => {
+    if (!api || !character || busy) return;
+    if (!prompt.trim()) {
+      toast('提示词内容不能为空');
+      return;
+    }
+    setBusy(true);
+    try {
+      await api.savePortraitPrompt(projectId, character.id, prompt.trim());
+      onUpdated();
+      toast('提示词已保存（未出图）');
+    } catch (e) {
       toast(friendlyError(e));
     } finally {
       setBusy(false);
@@ -122,7 +136,7 @@ export function PortraitSheet({
     setBusy(true);
     setPhase('提示词生成中…');
     try {
-      const p = await api.portraitPromptAsync(projectId, character.id, { style, view, extra_requirements: extra });
+      const p = await api.portraitPromptAsync(projectId, character.id, { style, view, extra_requirements: extra, outfit });
       await pollTask(api, p.task_id, { onTick: (t) => setPhase(`提示词 ${t.progress ?? 0}%`) });
       const fresh = await refreshChar();
       const finalPrompt = (fresh?.reference_prompt ?? '').trim();
@@ -236,13 +250,32 @@ export function PortraitSheet({
           </View>
         </View>
 
+        {outfitNames.length > 0 ? (
+          <View style={{ gap: 8 }}>
+            <FieldLabel>装扮</FieldLabel>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0 }} contentContainerStyle={{ gap: 7 }}>
+              {['', ...outfitNames].map((name) => (
+                <Pressable key={name || '__profile__'} onPress={() => setOutfit(name)}>
+                  <Chip label={name || '按档案外貌'} fg={outfit === name ? C.gold : C.text2} bg={outfit === name ? C.goldSoft : C.card2} bold={outfit === name} />
+                </Pressable>
+              ))}
+            </ScrollView>
+          </View>
+        ) : null}
+
         <View style={{ gap: 7 }}>
           <FieldLabel>补充要求（可选）</FieldLabel>
           <Input value={extra} onChangeText={setExtra} placeholder="如：穿第二章后的黑斗篷" height={40} />
         </View>
 
         <View style={{ gap: 7 }}>
-          <FieldLabel>立绘提示词（可编辑）</FieldLabel>
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <FieldLabel>立绘提示词（可编辑）</FieldLabel>
+            <View style={{ flex: 1 }} />
+            <Pressable onPress={savePrompt} disabled={busy} hitSlop={6}>
+              <Text style={{ color: C.blue, fontSize: 12, fontWeight: '700' }}>只存提示词（不出图）</Text>
+            </Pressable>
+          </View>
           <Input value={prompt} onChangeText={setPrompt} placeholder="点「AI 写提示词」自动生成" multiline height={110} />
         </View>
 

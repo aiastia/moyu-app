@@ -3,8 +3,15 @@ import { Pressable, Text, View } from 'react-native';
 import { CoverArt } from '@/components/CoverArt';
 import { Chip, ProgressBar } from '@/components/ui';
 import type { Book } from '@/lib/api';
-import { fmtPercent, fmtRelative, fmtWords, STORY_KIND_LABEL } from '@/lib/format';
+import { BOOK_STATUS_LABEL, fmtPercent, fmtRelative, fmtWords, normalizeBookStatus, STORY_KIND_LABEL } from '@/lib/format';
 import { C, R } from '@/lib/theme';
+
+/** 连载状态徽章配色：完结绿/暂更金/太监红（连载中是默认态不显示，与网页端一致） */
+const STATUS_CHIP: Record<string, { fg: string; bg: string }> = {
+  completed: { fg: C.green, bg: C.greenSoft },
+  paused: { fg: C.gold, bg: C.goldSoft },
+  abandoned: { fg: C.seal, bg: C.sealSoft },
+};
 
 export function BookCard({
   book,
@@ -19,6 +26,9 @@ export function BookCard({
   const kind = STORY_KIND_LABEL[book.story_kind] ?? '作品';
   const isShortKind = book.story_kind === 'short' || book.story_kind === 'single';
   const subCount = book.submissions?.count ?? 0;
+  // 归档书按归档前状态显示徽章（旧归档数据无暂存值兜底连载中=不显示）
+  const serialStatus = book.status === 'archived' ? normalizeBookStatus(book.pre_archive_status) : normalizeBookStatus(book.status);
+  const statusChip = STATUS_CHIP[serialStatus];
   return (
     <Pressable
       onPress={onPress}
@@ -46,6 +56,13 @@ export function BookCard({
           <Chip label={kind} fg={isShortKind ? C.purple : C.blue} bg={isShortKind ? C.purpleSoft : C.blueSoft} />
           {book.outline_mode === 'one_to_many' ? <Chip label="细化模式" fg={C.green} bg={C.greenSoft} /> : null}
           {subCount > 0 ? <Chip label={`已投 ${subCount}`} fg={C.gold} bg={C.goldSoft} /> : null}
+          {statusChip && serialStatus !== 'active' ? (
+            <Chip
+              label={book.status === 'archived' ? `归档前·${BOOK_STATUS_LABEL[serialStatus]}` : BOOK_STATUS_LABEL[serialStatus]}
+              fg={statusChip.fg}
+              bg={statusChip.bg}
+            />
+          ) : null}
           {book.status === 'archived' ? <Chip label="已归档" fg={C.text3} bg={C.card2} /> : null}
         </View>
         {book.desc ? (

@@ -16,6 +16,8 @@ export interface Book {
   /** 后端与 tag 同值的类型原文（tag 是兜底"其他"后的值，搜索用 genre 原文） */
   genre?: string | null;
   status?: string | null;
+  /** 归档书专有：归档前的连载状态（settings 暂存）；旧归档数据/在架书为 null（展示兜底连载中） */
+  pre_archive_status?: string | null;
   type?: string | null;
   story_kind: 'long' | 'short' | string;
   outline_mode?: string;
@@ -44,6 +46,10 @@ export interface ProjectDetail {
   outline_mode?: string;
   /** 当前绑定的写作风格（服务端存对象：{style_id, name, custom_prompt, …}，展示用 name） */
   writing_style?: { style_id?: number; name?: string; [k: string]: unknown } | null;
+  /** 封面提示词列表（≤5 条，列表制权威数据；cover_prompt 恒=列表第一条=最旧一条，生成新词要读这里） */
+  cover_prompts?: CoverPromptItem[] | null;
+  /** 封面保留画廊（≤5 张，图片与提示词成对存档） */
+  cover_gallery?: CoverGalleryEntry[] | null;
   /** 短篇故事卡（短篇项目才有，长篇为 null） */
   story_card?: StoryCard | null;
 }
@@ -195,6 +201,39 @@ export interface CharacterItem {
   reference_prompt?: string | null;
   /** 别名/称呼列表（与 name 一起在正文里召回该角色）；NULL=未设置 */
   aliases?: string[] | null;
+  /** 多套装扮（[{name, description}]，立绘/封面按名选装）；NULL/空=未设置（按档案外貌出图） */
+  outfits?: CharacterOutfit[] | null;
+}
+
+/** 角色装扮条目（服务端 normalize_outfits 归一为 {name, description}，坏条目直接丢弃） */
+export interface CharacterOutfit {
+  name: string;
+  description: string;
+}
+
+/** 封面提示词列表条目（存 projects.cover_prompts，最多 5 条；生成新词自动追加到尾部） */
+export interface CoverPromptItem {
+  id: string;
+  content: string;
+  rating?: number;
+  created_at?: string;
+}
+
+/** 封面保留画廊条目（≤5 张；图片与提示词成对存档，重新出图/上传只覆盖主图不冲掉保留结果） */
+export interface CoverGalleryEntry {
+  id: string;
+  prompt?: string;
+  [k: string]: unknown;
+}
+
+/** 能力模块（生成主链插件：context_provider/postprocess_hook 两钩子，项目级启停） */
+export interface CapabilityModule {
+  name: string;
+  title: string;
+  enabled: boolean;
+  default_enabled: boolean;
+  desc: string;
+  params: { key: string; value?: number; [k: string]: unknown }[];
 }
 
 export interface TaskItem {
@@ -218,6 +257,8 @@ export interface TaskItem {
   max_retries?: number | null;
   created_at?: string | null;
   completed_at?: string | null;
+  /** 任务结果（完成后才有；结构随 task_type 不同，如配装任务的 {added, saved, message}） */
+  result?: Record<string, unknown> | null;
 }
 
 export interface LoginUser {
@@ -367,6 +408,8 @@ export interface CharacterBody {
   organization_id?: number | null;
   /** 别名/称呼列表（正文召回时与姓名一起匹配） */
   aliases?: string[];
+  /** 多套装扮：服务端仅在载荷显式带 outfits 时才整表替换，不带不误清 */
+  outfits?: CharacterOutfit[];
 }
 
 export interface ForeshadowBody {
@@ -390,7 +433,10 @@ export interface WorldCore {
   world_rules: string;
 }
 
-/** 项目元信息编辑（网页端仪表盘「项目信息卡」同款字段；status 用于归档/恢复） */
+/** 项目元信息编辑（网页端仪表盘「项目信息卡」同款字段）。
+ *  归档/恢复走独立旋钮 archived（true=归档，false=恢复，恢复优先回到归档前连载状态）；
+ *  旧语义仍兼容：status 传 'archived'=归档、'active' 作用于归档书=恢复。
+ *  归档书上 status 四态只改「归档前状态」暂存，书保持归档不复活。 */
 export interface ProjectUpdateBody {
   title?: string;
   genre?: string;
@@ -400,6 +446,7 @@ export interface ProjectUpdateBody {
   target_platform?: string;
   pen_name?: string;
   status?: string;
+  archived?: boolean;
 }
 
 // ===== 故事蓝图 =====
@@ -847,10 +894,67 @@ export const REVISION_SOURCE_LABEL: Record<string, string> = {
   rollback: '撤销回滚',
 };
 
-/** 任务类型 → 展示文案（详情弹窗的类型徽标） */
+/** 任务类型 → 展示文案（详情弹窗的类型徽标；与网页端 task-types.ts 的 TASK_TYPE_META 对齐） */
 export const TASK_TYPE_LABEL: Record<string, string> = {
+  init: '项目初始化',
+  world: '世界观生成',
+  world_core: '世界观生成',
+  outline: '大纲生成',
+  outline_supplement: '大纲实体补全',
+  organizations: '组织生成',
+  characters: '角色生成',
+  character_regenerate: '角色重生成',
+  character_outfit_suggest: '角色装扮',
+  outline_new: '大纲生成',
+  outline_continue: '大纲续写',
+  outline_expand: '大纲展开',
+  pending_entities: '补全物品/地点/角色',
+  pending_items: '补充物品',
+  pending_locations: '补充地点',
+  pending_characters: '补充角色',
+  pending_organizations: '补充组织',
+  chapter_generate: '章节生成',
+  chapter_batch: '批量生成',
+  auto_write_loop: '一键连写',
+  chapter_analyze: '剧情分析',
+  chapter_batch_analyze: '批量分析',
+  chapter_batch_polish: '批量润色',
+  chapter_polish: '章节润色',
+  segment_polish: '段落润色',
+  short_story_review: '短篇审稿',
+  chapter_regenerate: '章节改写',
+  chapter_batch_regenerate: '批量改写',
+  chapter_easter_egg: '彩蛋章节',
+  chapter_illustration: '插画提示词',
+  chapter_screenplay: '生成分镜',
+  chapter_tts: '生成语音',
+  book_import: '拆书导入',
+  ai_denoising: '去AI味',
+  blueprint_new: '创建蓝图',
+  blueprint_continue: '续写蓝图',
+  volume_plan: '分篇规划',
+  foreshadow_plan: '伏笔规划',
   chat_read_review: '通读审稿',
+  auto_rebuild_relations: '重建关系',
   new_char_relations: '角色关系分析',
+  source_canon: '原作圣经生成',
+  career_system: '职业体系',
+  cover_prompt: '封面提示词',
+  cover_image: '封面出图',
+  character_portrait_prompt: '立绘提示词',
+  character_portrait_image: '立绘出图',
+  item_portrait_prompt: '道具立绘提示词',
+  item_portrait_image: '道具立绘出图',
+  location_portrait_prompt: '地点立绘提示词',
+  location_portrait_image: '地点立绘出图',
+  entity_ai_edit: '实体AI修改',
+  org_member_assign: '组织成员分配',
+  inspire: '灵感方案',
+  story_arc: '全书弧线',
+  skill_gen_career_system_generation: '技能生成·职业体系',
+  skill_gen_locations_generate: '技能生成·地点',
+  skill_gen_items_generate: '技能生成·物品',
+  skill_gen_world_detail_generate: '技能生成·世界观',
 };
 
 export class ApiError extends Error {
@@ -935,7 +1039,7 @@ export class Api {
     return this.req<ProjectDetail>(`/api/projects/${id}`);
   }
 
-  /** 编辑项目元信息（书名/笔名/题材/视角/目标平台/字数/简介），status 传 archived/active 做归档恢复 */
+  /** 编辑项目元信息（书名/笔名/题材/视角/目标平台/字数/简介）；归档/恢复传 archived 布尔 */
   updateProject(id: number, body: ProjectUpdateBody) {
     return this.req<{ ok: boolean }>(`/api/projects/${id}`, {
       method: 'PUT',
@@ -1166,11 +1270,11 @@ export class Api {
     });
   }
 
-  /** 提交单章正文生成（异步任务，返回 task_id） */
-  generateChapter(projectId: number, chapterId: number) {
+  /** 提交单章正文生成（异步任务，返回 task_id）。includeNextOpening=衔接锚点：下一章已有正文时注入其开头 500 字防中间章重写后矛盾（默认关） */
+  generateChapter(projectId: number, chapterId: number, includeNextOpening = false) {
     return this.req<{ task_id: number; chapter_id?: number }>(`/api/projects/${projectId}/chapters/${chapterId}/generate-async`, {
       method: 'POST',
-      body: JSON.stringify({}),
+      body: JSON.stringify(includeNextOpening ? { include_next_opening: true } : {}),
     });
   }
 
@@ -1560,10 +1664,10 @@ export class Api {
 
   // ===== 章节重写 =====
   /** 提交整章重写（异步任务，只产草稿不覆盖正文；完成后在重写面板对比应用） */
-  regenerateChapterAsync(projectId: number, chapterId: number, instructions: string, includeAnalysis = true) {
+  regenerateChapterAsync(projectId: number, chapterId: number, instructions: string, includeAnalysis = true, includeNextOpening = false) {
     return this.req<{ task_id: number }>(`/api/projects/${projectId}/chapters/${chapterId}/regenerate/async`, {
       method: 'POST',
-      body: JSON.stringify({ instructions, include_analysis: includeAnalysis }),
+      body: JSON.stringify({ instructions, include_analysis: includeAnalysis, include_next_opening: includeNextOpening }),
     });
   }
 
@@ -1674,7 +1778,7 @@ export class Api {
   }
 
   // ===== 封面 =====
-  /** AI 生成封面提示词（异步任务，结果写进 project.cover_prompt） */
+  /** AI 生成封面提示词（异步任务，新词追加进 projects.cover_prompts 列表尾部，读最新一条要取列表末位） */
   coverPromptAsync(projectId: number) {
     return this.req<{ task_id: number }>(`/api/projects/${projectId}/cover/generate-prompt`, {
       method: 'POST',
@@ -1682,19 +1786,67 @@ export class Api {
     });
   }
 
-  /** 用提示词生成封面图片（异步任务，结果通过 cover/image 查看） */
-  coverImageAsync(projectId: number, prompt: string, size = '1024x1536') {
+  /** 用提示词生成封面图片（异步任务，结果通过 cover/image 查看）。quality 空串=走接口默认 */
+  coverImageAsync(projectId: number, prompt: string, size = '1024x1536', quality = '') {
     return this.req<{ task_id: number }>(`/api/projects/${projectId}/cover/generate-image`, {
       method: 'POST',
-      body: JSON.stringify({ prompt, size }),
+      body: JSON.stringify({ prompt, size, quality }),
     });
   }
 
+  /** 修改单条封面提示词（content=正文 / rating=评分 0-5，至少一项） */
+  updateCoverPromptItem(projectId: number, itemId: string, body: { content?: string; rating?: number }) {
+    return this.req<{ cover_prompts: CoverPromptItem[] }>(`/api/projects/${projectId}/cover/prompts/${itemId}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    });
+  }
+
+  /** 删除单条封面提示词（腾出名额可再生成新的） */
+  deleteCoverPromptItem(projectId: number, itemId: string) {
+    return this.req<{ cover_prompts: CoverPromptItem[] }>(`/api/projects/${projectId}/cover/prompts/${itemId}`, { method: 'DELETE' });
+  }
+
+  /** 保留当前封面进画廊（复制主图为独立文件、与提示词成对存档，≤5 张） */
+  keepCoverGallery(projectId: number, prompt = '') {
+    return this.req<{ ok: boolean; cover_gallery: CoverGalleryEntry[] }>(`/api/projects/${projectId}/cover/gallery`, {
+      method: 'POST',
+      body: JSON.stringify({ prompt }),
+    });
+  }
+
+  /** 删除一条保留封面（图片文件一并删；若是当前封面则同步清空 cover_url） */
+  deleteCoverGalleryItem(projectId: number, entryId: string) {
+    return this.req<{ ok: boolean; cover_gallery: CoverGalleryEntry[] }>(`/api/projects/${projectId}/cover/gallery/${entryId}`, { method: 'DELETE' });
+  }
+
+  /** 把保留画廊里的某张设为当前封面（回写 cover_url，书架/投稿/导出随之切换） */
+  activateCoverGalleryItem(projectId: number, entryId: string) {
+    return this.req<{ ok: boolean; cover_gallery: CoverGalleryEntry[] }>(`/api/projects/${projectId}/cover/gallery/${entryId}/activate`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+  }
+
+  /** 保留画廊图片地址（id8 为条目 id 的 8 位 hex 后缀；鉴权同封面主图） */
+  coverGalleryImageUrl(projectId: number, entryId: string) {
+    const id8 = entryId.replace(/^cg_/, '');
+    return `${this.baseUrl}/api/projects/${projectId}/cover/gallery/${id8}/image`;
+  }
+
   // ===== 角色立绘 =====
-  portraitPromptAsync(projectId: number, characterId: number, body: { style: string; view: string; extra_requirements?: string }) {
+  portraitPromptAsync(projectId: number, characterId: number, body: { style: string; view: string; extra_requirements?: string; outfit?: string }) {
     return this.req<{ task_id: number }>(`/api/projects/${projectId}/characters/${characterId}/portrait/generate-prompt`, {
       method: 'POST',
       body: JSON.stringify(body),
+    });
+  }
+
+  /** 只存立绘提示词（不调 AI 不出图，直接落库 reference_prompt） */
+  savePortraitPrompt(projectId: number, characterId: number, prompt: string) {
+    return this.req<{ ok: boolean; reference_prompt: string }>(`/api/projects/${projectId}/characters/${characterId}/portrait/prompt`, {
+      method: 'PUT',
+      body: JSON.stringify({ prompt }),
     });
   }
 
@@ -1711,6 +1863,28 @@ export class Api {
 
   portraitUrl(characterId: number) {
     return `${this.baseUrl}/api/portraits/${characterId}/image`;
+  }
+
+  // ===== 角色装扮 =====
+  /** AI 配装扮（异步任务）：完成即自动落库追加合并（同名跳过），result 带回 added/saved */
+  suggestOutfits(projectId: number, characterId: number, count = 3, userInstructions = '') {
+    return this.req<{ task_id: number }>(`/api/projects/${projectId}/characters/${characterId}/outfits/suggest`, {
+      method: 'POST',
+      body: JSON.stringify({ count, user_instructions: userInstructions }),
+    });
+  }
+
+  // ===== 能力模块（CapabilityModule 注册表：伏笔提醒/资源账本/叙事技巧/TTS/分镜等） =====
+  getCapabilityModules(projectId: number) {
+    return this.req<{ modules: CapabilityModule[] }>(`/api/projects/${projectId}/capability-modules`);
+  }
+
+  /** 启停单个能力模块（存 project.settings.capability_modules，改动立即生效） */
+  updateCapabilityModule(projectId: number, name: string, enabled: boolean) {
+    return this.req<{ ok: boolean; name: string; enabled: boolean }>(`/api/projects/${projectId}/capability-modules`, {
+      method: 'PUT',
+      body: JSON.stringify({ name, enabled }),
+    });
   }
 
   // ===== AI 聊天助手：会话 / 消息 =====

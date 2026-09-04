@@ -635,13 +635,17 @@ export function SheetModal({ visible, onClose, title, children }: { visible: boo
   const maxScrollH = Math.max(160, Math.round(winH * 0.62) - kbH);
 
   useEffect(() => {
-    if (visible) {
+    if (!visible) return;
+    // 下一帧清内容高度（同步清会被 set-state-in-effect 拦）+ 布局稳定后再回顶一次，清掉首帧全高布局残留的底部偏移
+    const raf = requestAnimationFrame(() => {
       setContentH(0);
-      // 下一帧 + 布局稳定后各回顶一次，清掉首帧全高布局残留的底部偏移
-      requestAnimationFrame(() => scrollRef.current?.scrollTo({ y: 0, animated: false }));
-      const t = setTimeout(() => scrollRef.current?.scrollTo({ y: 0, animated: false }), 80);
-      return () => clearTimeout(t);
-    }
+      scrollRef.current?.scrollTo({ y: 0, animated: false });
+    });
+    const t = setTimeout(() => scrollRef.current?.scrollTo({ y: 0, animated: false }), 80);
+    return () => {
+      cancelAnimationFrame(raf);
+      clearTimeout(t);
+    };
   }, [visible]);
 
   return (

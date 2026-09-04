@@ -2,7 +2,7 @@
   "expo": {
     "name": "墨鱼写作",
     "slug": "moyu-app",
-    "version": "2.1.0",
+    "version": "2.2.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "moyuapp",
@@ -10,7 +10,7 @@
     "backgroundColor": "#0B0D13",
     "android": {
       "package": "com.moyu.writer",
-      "versionCode": 23,
+      "versionCode": 24,
       "adaptiveIcon": {
         "backgroundColor": "#0C0E16",
         "foregroundImage": "./assets/images/android-icon-foreground.png",

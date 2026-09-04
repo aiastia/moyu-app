@@ -30,32 +30,30 @@ async function fetchAuthImage(url: string, token: string): Promise<string | null
  */
 export function useAuthImage(key: string | null, url: string | null, refreshKey = 0): string | null | undefined {
   const { api } = useAuth();
-  const cached = imageCache.get(`${key}:${refreshKey}`);
-  const [uri, setUri] = useState<string | null | undefined>(cached);
+  const cacheKey = `${key}:${refreshKey}`;
+  // 缓存命中渲染期直读、不进 state（同步 setUri 会被 set-state-in-effect 拦）；
+  // state 只记本 hook 实例异步拉到的结果，带 key 防 refreshKey 切换后串值
+  const cached = key ? imageCache.get(cacheKey) : undefined;
+  const [fetched, setFetched] = useState<{ k: string; v: string | null } | null>(null);
 
   useEffect(() => {
-    if (!key || !url || !api) return;
-    const cacheKey = `${key}:${refreshKey}`;
-    if (imageCache.has(cacheKey)) {
-      setUri(imageCache.get(cacheKey) ?? null);
-      return;
-    }
+    if (!key || !url || !api || imageCache.has(cacheKey)) return;
     let alive = true;
-    setUri(undefined);
     (async () => {
       try {
         const data = await fetchAuthImage(url, api.token);
         imageCache.set(cacheKey, data);
-        if (alive) setUri(data);
+        if (alive) setFetched({ k: cacheKey, v: data });
       } catch {
         imageCache.set(cacheKey, null);
-        if (alive) setUri(null);
+        if (alive) setFetched({ k: cacheKey, v: null });
       }
     })();
     return () => {
       alive = false;
     };
-  }, [key, url, api, refreshKey]);
+  }, [key, url, api, cacheKey]);
 
-  return uri;
+  if (cached !== undefined) return cached;
+  return fetched?.k === cacheKey ? fetched.v : undefined;
 }

@@ -10,16 +10,28 @@ import { EmptyState, SelectField, SheetModal, Skeleton, useConfirm, useToast } f
 import type { Book } from '@/lib/api';
 import { ApiError } from '@/lib/api';
 import { friendlyError, useAuth } from '@/lib/auth';
+import { BOOK_STATUS_LABEL, normalizeBookStatus, statusSortKey } from '@/lib/format';
 import { C, R, SP } from '@/lib/theme';
 
 type ModeFilter = 'all' | 'one_to_one' | 'one_to_many';
 type SubFilter = 'all' | 'submitted' | 'none' | 'archived';
+type SortKey = 'status' | 'updated' | 'id_desc' | 'id_asc';
 
 const MODE_CHIPS: { key: ModeFilter; label: string }[] = [
   { key: 'all', label: '全部' },
   { key: 'one_to_one', label: '传统模式' },
   { key: 'one_to_many', label: '细化模式' },
 ];
+
+const SORT_OPTIONS: { value: SortKey; label: string }[] = [
+  { value: 'status', label: '状态优先' },
+  { value: 'updated', label: '最近更新在前' },
+  { value: 'id_desc', label: 'ID 从大到小' },
+  { value: 'id_asc', label: 'ID 从小到大' },
+];
+
+/** 状态优先排序取连载状态：归档书按归档前状态归组（与网页端口径一致） */
+const serialStatusOf = (b: Book) => (b.status === 'archived' ? b.pre_archive_status : b.status);
 
 export default function BookshelfScreen() {
   const { api, baseUrl, logout, user } = useAuth();
@@ -32,6 +44,7 @@ export default function BookshelfScreen() {
   const [keyword, setKeyword] = useState('');
   const [mode, setMode] = useState<ModeFilter>('all');
   const [sub, setSub] = useState<SubFilter>('all');
+  const [sort, setSort] = useState<SortKey>('status');
   // 长按书籍卡片的操作面板 / 投稿记录弹窗
   const [actionBook, setActionBook] = useState<Book | null>(null);
   const [subBook, setSubBook] = useState<Book | null>(null);
@@ -67,8 +80,11 @@ export default function BookshelfScreen() {
     [api, logout],
   );
 
+  // load 的 setState 全在异步续延里触发；包一层 async 边界（直接调用会被 set-state-in-effect 规则判为同步写）
   useEffect(() => {
-    load();
+    (async () => {
+      await load();
+    })();
   }, [load]);
 
   // 从建书页/项目页返回时静默刷新
@@ -96,14 +112,22 @@ export default function BookshelfScreen() {
     else if (sub === 'none') list = list.filter((b) => !(b.submissions?.count ?? 0));
     const k = keyword.trim().toLowerCase();
     if (k) {
-      list = list.filter((b) =>
-        [b.title, b.tag, b.genre ?? b.tag, ...(b.submissions?.platforms ?? [])]
+      // 纯数字关键词走 ID 前缀匹配（输 44 命中 44 不误中 144），非数字仍走文本包含，两路 OR
+      const byId = /^\d+$/.test(k);
+      list = list.filter((b) => {
+        const hay = [b.title, b.tag, b.genre ?? b.tag, ...(b.submissions?.platforms ?? [])]
           .filter(Boolean)
-          .some((s) => String(s).toLowerCase().includes(k)),
-      );
+          .map((s) => String(s).toLowerCase());
+        return (byId && String(b.id).startsWith(k)) || hay.some((s) => s.includes(k));
+      });
     }
+    // 排序全在前端本地做：updated=后端原序（updated_at 倒序）；状态优先=连载→暂更→太监→完结，
+    // 同状态保持原序（Array.prototype.sort 稳定），归档书按归档前状态归组
+    if (sort === 'id_desc') list = [...list].sort((a, b) => b.id - a.id);
+    else if (sort === 'id_asc') list = [...list].sort((a, b) => a.id - b.id);
+    else if (sort === 'status') list = [...list].sort((a, b) => statusSortKey(serialStatusOf(a)) - statusSortKey(serialStatusOf(b)));
     return list;
-  }, [books, keyword, mode, sub]);
+  }, [books, keyword, mode, sub, sort]);
 
   const host = useMemo(() => {
     if (!baseUrl) return '';
@@ -130,7 +154,7 @@ export default function BookshelfScreen() {
       onConfirm: async () => {
         if (!api) return;
         try {
-          await api.updateProject(b.id, { status: 'archived' });
+          await api.updateProject(b.id, { archived: true });
           toast('已归档');
           load(true);
         } catch (e) {
@@ -144,7 +168,7 @@ export default function BookshelfScreen() {
     setActionBook(null);
     if (!api) return;
     try {
-      await api.updateProject(b.id, { status: 'active' });
+      await api.updateProject(b.id, { archived: false });
       toast('已恢复到书架');
       load(true);
     } catch (e) {
@@ -212,7 +236,7 @@ export default function BookshelfScreen() {
           <TextInput
             value={keyword}
             onChangeText={setKeyword}
-            placeholder="搜索书名 / 类型 / 投稿平台"
+            placeholder="搜索书名 / 类型 / 平台 / ID"
             placeholderTextColor="#5A6170"
             style={{ flex: 1, color: C.text, fontSize: 14, paddingVertical: 0 }}
           />
@@ -223,7 +247,7 @@ export default function BookshelfScreen() {
           ) : null}
         </View>
 
-        <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+        <View style={{ flexDirection: 'row', gap: 8 }}>
           {MODE_CHIPS.map((f) => {
             const on = mode === f.key;
             return (
@@ -245,8 +269,13 @@ export default function BookshelfScreen() {
               </Pressable>
             );
           })}
-          <View style={{ flex: 1, minWidth: 130 }}>
+        </View>
+        <View style={{ flexDirection: 'row', gap: 8 }}>
+          <View style={{ flex: 1 }}>
             <SelectField value={sub} options={subOptions} onChange={switchSub} placeholder="投稿状态" />
+          </View>
+          <View style={{ flex: 1 }}>
+            <SelectField value={sort} options={SORT_OPTIONS} onChange={(v) => setSort(v as SortKey)} placeholder="排序方式" />
           </View>
         </View>
 
@@ -321,21 +350,26 @@ export default function BookshelfScreen() {
             <Text style={{ color: C.text, fontSize: 15, fontWeight: '600' }}>投稿记录</Text>
           </Pressable>
           {actionBook && actionBook.status === 'archived' ? (
-            <Pressable
-              onPress={() => actionBook && doRestore(actionBook)}
-              style={({ pressed }) => ({
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: 12,
-                paddingVertical: 14,
-                paddingHorizontal: 14,
-                borderRadius: R.m,
-                backgroundColor: pressed ? C.card2 : 'transparent',
-              })}
-            >
-              <Ionicons name="refresh-outline" size={19} color={C.gold} />
-              <Text style={{ color: C.text, fontSize: 15, fontWeight: '600' }}>恢复到书架</Text>
-            </Pressable>
+            <>
+              <Text style={{ color: C.text3, fontSize: 12, paddingHorizontal: 14 }}>
+                归档前连载状态：{BOOK_STATUS_LABEL[normalizeBookStatus(actionBook.pre_archive_status)]}，恢复后回到该状态
+              </Text>
+              <Pressable
+                onPress={() => actionBook && doRestore(actionBook)}
+                style={({ pressed }) => ({
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 12,
+                  paddingVertical: 14,
+                  paddingHorizontal: 14,
+                  borderRadius: R.m,
+                  backgroundColor: pressed ? C.card2 : 'transparent',
+                })}
+              >
+                <Ionicons name="refresh-outline" size={19} color={C.gold} />
+                <Text style={{ color: C.text, fontSize: 15, fontWeight: '600' }}>恢复到书架</Text>
+              </Pressable>
+            </>
           ) : (
             <Pressable
               onPress={() => actionBook && doArchive(actionBook)}
