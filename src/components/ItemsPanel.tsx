@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 
 import { Chip, EmptyState, FieldLabel, Input, SelectField, SheetModal, Skeleton, Toggle, useConfirm, useToast } from '@/components/ui';
+import { PortraitSheet } from '@/components/PortraitSheet';
 import type { ItemEntity } from '@/lib/api';
 import { ApiError, ITEM_RARITY_LABEL, ITEM_STATUS_LABEL } from '@/lib/api';
 import { friendlyError, useAuth } from '@/lib/auth';
@@ -46,6 +47,7 @@ export function ItemsPanel({ projectId }: { projectId: number }) {
   const [aiCategory, setAiCategory] = useState('');
   const [aiReq, setAiReq] = useState('');
   const [aiSubmitting, setAiSubmitting] = useState(false);
+  const [portraitItem, setPortraitItem] = useState<ItemEntity | null>(null);
   const [toast, toastNode] = useToast();
   const [confirm, confirmNode] = useConfirm();
 
@@ -217,6 +219,22 @@ export function ItemsPanel({ projectId }: { projectId: number }) {
                 {it.is_key_item ? <Chip label="关键道具" fg={C.gold} bg={C.goldSoft} bold /> : null}
                 {it.category ? <Chip label={it.category} fg={C.green} bg={C.greenSoft} /> : null}
                 {it.rarity ? <Chip label={ITEM_RARITY_LABEL[it.rarity] ?? it.rarity} fg={rc.fg} bg={rc.bg} /> : null}
+                <Pressable
+                  onPress={() => setPortraitItem(it)}
+                  hitSlop={6}
+                  style={{
+                    width: 30,
+                    height: 30,
+                    borderRadius: 10,
+                    backgroundColor: it.reference_image ? C.goldSoft : C.card2,
+                    borderWidth: 1,
+                    borderColor: it.reference_image ? 'rgba(229,181,88,0.35)' : C.borderSoft,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <Ionicons name="image-outline" size={15} color={it.reference_image ? C.gold : C.text3} />
+                </Pressable>
                 <Ionicons name="chevron-forward" size={14} color={C.text3} />
               </View>
               {it.description ? (
@@ -322,6 +340,17 @@ export function ItemsPanel({ projectId }: { projectId: number }) {
         </Pressable>
         <Text style={{ color: C.text3, fontSize: 11, lineHeight: 16, textAlign: 'center' }}>异步执行不占手机，完成后回本页下拉刷新</Text>
       </SheetModal>
+
+      {/* key=实体 id：换实体/重开整组件重挂载，状态初始化即实体当前值 */}
+      <PortraitSheet
+        key={portraitItem ? `item-portrait-${portraitItem.id}` : 'item-portrait-none'}
+        projectId={projectId}
+        kind="item"
+        entity={portraitItem}
+        visible={portraitItem !== null}
+        onClose={() => setPortraitItem(null)}
+        onUpdated={load}
+      />
     </View>
   );
 }

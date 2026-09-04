@@ -27,8 +27,20 @@ const QUALITIES = [
 
 const GALLERY_MAX = 5;
 
-/** 画廊缩略图：带鉴权拉画廊图片（走 useAuthImage 缓存） */
-function GalleryThumb({ url, onPress, onLongPress }: { url: string | null; onPress: () => void; onLongPress: () => void }) {
+/** 画廊角标：出自版本N / 已删除 / 外链 / 上传 / 已保留 */
+function galleryTag(entry: CoverGalleryEntry, prompts: CoverPromptItem[]): string {
+  const pid = entry.prompt_id ?? '';
+  if (pid) {
+    const idx = prompts.findIndex((p) => p.id === pid);
+    return idx >= 0 ? `版本${idx + 1}` : '已删除';
+  }
+  if ((entry.image ?? '').startsWith('http')) return '外链';
+  if (entry.prompt === '（用户上传）') return '上传';
+  return '已保留';
+}
+
+/** 画廊缩略图：带鉴权拉画廊图片（走 useAuthImage 缓存），右下角来源角标 */
+function GalleryThumb({ url, tag, onPress, onLongPress }: { url: string | null; tag: string; onPress: () => void; onLongPress: () => void }) {
   const uri = useAuthImage(url, url);
   return (
     <Pressable
@@ -55,6 +67,19 @@ function GalleryThumb({ url, onPress, onLongPress }: { url: string | null; onPre
       ) : (
         <ActivityIndicator size="small" color={C.gold} />
       )}
+      <View
+        style={{
+          position: 'absolute',
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.62)',
+          borderTopLeftRadius: 8,
+          paddingHorizontal: 5,
+          paddingVertical: 2,
+        }}
+      >
+        <Text style={{ color: '#E8E3D8', fontSize: 9, fontWeight: '600' }}>{tag}</Text>
+      </View>
     </Pressable>
   );
 }
@@ -70,10 +95,12 @@ export function CoverSheet({ projectId, initialPrompt, onCoverChanged }: { proje
   const [phase, setPhase] = useState('');
   const [toast, toastNode] = useToast();
   const [confirm, confirmNode] = useConfirm();
-  // 提示词列表（服务端 cover_prompts，末位=最新）与保留画廊；打开面板时拉一次项目详情
+  // 提示词列表（服务端 cover_prompts，末位=最新）与画廊；打开面板时拉一次项目详情
   const [promptItems, setPromptItems] = useState<CoverPromptItem[]>([]);
   const [selectedPromptId, setSelectedPromptId] = useState<string | null>(null);
   const [gallery, setGallery] = useState<CoverGalleryEntry[]>([]);
+  // 本地文件条目才计 5 张上限（外链不占名额，与后端口径一致）
+  const localGalleryCount = gallery.filter((e) => (e.image ?? '').startsWith('/data/covers/')).length;
 
   /** 拉项目详情同步提示词列表与画廊；items 非空时默认选中最新一条 */
   const syncProject = async () => {
@@ -139,11 +166,11 @@ export function CoverSheet({ projectId, initialPrompt, onCoverChanged }: { proje
     setBusy(true);
     setPhase('封面出图中…');
     try {
-      const r = await api.coverImageAsync(projectId, prompt.trim(), size, quality);
+      const r = await api.coverImageAsync(projectId, prompt.trim(), size, quality, selectedPromptId ?? '');
       await pollTask(api, r.task_id, { onTick: (t) => setPhase(`出图 ${t.progress ?? 0}%`) });
       refreshAfterImage();
       setOpen(false);
-      toast('封面已生成');
+      toast('封面已生成（已自动存入画廊）');
     } catch (e) {
       setPhase('');
       toast(friendlyError(e));
@@ -165,11 +192,11 @@ export function CoverSheet({ projectId, initialPrompt, onCoverChanged }: { proje
       if (items.length) setSelectedPromptId(items[items.length - 1].id);
       if (!finalPrompt.trim()) throw new Error('提示词生成结果为空');
       setPhase('封面出图中…');
-      const img = await api.coverImageAsync(projectId, finalPrompt, size, quality);
+      const img = await api.coverImageAsync(projectId, finalPrompt, size, quality, selectedPromptId ?? '');
       await pollTask(api, img.task_id, { onTick: (t) => setPhase(`出图 ${t.progress ?? 0}%`) });
       refreshAfterImage();
       setOpen(false);
-      toast('封面已生成');
+      toast('封面已生成（已自动存入画廊）');
     } catch (e) {
       setPhase('');
       toast(friendlyError(e));
@@ -220,21 +247,6 @@ export function CoverSheet({ projectId, initialPrompt, onCoverChanged }: { proje
     });
   };
 
-  /** 保留当前封面进画廊（主图复制独立文件，与当前提示词成对存档；≤5 张） */
-  const keepToGallery = async () => {
-    if (!api || busy) return;
-    setBusy(true);
-    try {
-      const r = await api.keepCoverGallery(projectId, prompt.trim());
-      setGallery(r.cover_gallery ?? []);
-      toast('已保留当前封面进画廊');
-    } catch (e) {
-      toast(friendlyError(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const activateGalleryItem = (entry: CoverGalleryEntry) => {
     if (!api || busy) return;
     confirm({
@@ -274,7 +286,7 @@ export function CoverSheet({ projectId, initialPrompt, onCoverChanged }: { proje
     });
   };
 
-  /** 从手机相册选一张图上传当封面（服务端转存 PNG 覆盖式保存，≤15MB）。
+  /** 从手机相册选一张图上传当封面（服务端转存 PNG，自动入画廊并关联选中提示词版本；≤15MB）。
    *  库选择器走系统 UI，无需预先申请相册权限（v57 文档明确）。 */
   const pickAndUpload = async () => {
     if (!api || busy) return;
@@ -292,15 +304,20 @@ export function CoverSheet({ projectId, initialPrompt, onCoverChanged }: { proje
     setBusy(true);
     setPhase('上传封面中…');
     try {
-      const r = await api.uploadCover(projectId, {
-        uri: a.uri,
-        name: a.fileName ?? `cover.${a.mimeType === 'image/png' ? 'png' : 'jpg'}`,
-        type: a.mimeType || 'image/jpeg',
-      });
+      const r = await api.uploadCover(
+        projectId,
+        {
+          uri: a.uri,
+          name: a.fileName ?? `cover.${a.mimeType === 'image/png' ? 'png' : 'jpg'}`,
+          type: a.mimeType || 'image/jpeg',
+        },
+        selectedPromptId ?? '',
+      );
       clearAuthImageCache();
+      setGallery(r.cover_gallery ?? []);
       onCoverChanged();
       setOpen(false);
-      toast(`封面已上传（${r.size || `${a.width}x${a.height}`}）`);
+      toast(r.notice ? `封面已上传（${r.notice}）` : `封面已上传（${r.size || `${a.width}x${a.height}`}）`);
     } catch (e) {
       toast(friendlyError(e));
     } finally {
@@ -312,7 +329,7 @@ export function CoverSheet({ projectId, initialPrompt, onCoverChanged }: { proje
   /** 外链封面地址（Input 受控值） */
   const [url, setUrl] = useState('');
 
-  /** 直接把外部图床地址设为封面（不落盘本地，http(s) 开头） */
+  /** 直接把外部图床地址设为封面（不落盘本地，自动入画廊；http(s) 开头） */
   const applyUrl = async () => {
     if (!api || busy) return;
     if (!/^https?:\/\/\S+$/i.test(url.trim())) {
@@ -322,12 +339,13 @@ export function CoverSheet({ projectId, initialPrompt, onCoverChanged }: { proje
     setBusy(true);
     setPhase('设置外链封面…');
     try {
-      await api.setCoverUrl(projectId, url.trim());
+      const r = await api.setCoverUrl(projectId, url.trim(), selectedPromptId ?? '');
       clearAuthImageCache();
+      setGallery(r.cover_gallery ?? []);
       onCoverChanged();
       setOpen(false);
       setUrl('');
-      toast('封面已更新（外链）');
+      toast(r.notice ? `封面已更新（${r.notice}）` : '封面已更新（外链）');
     } catch (e) {
       toast(friendlyError(e));
     } finally {
@@ -441,29 +459,25 @@ export function CoverSheet({ projectId, initialPrompt, onCoverChanged }: { proje
         </View>
 
         <View style={{ gap: 7 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-            <FieldLabel>保留画廊（{gallery.length}/{GALLERY_MAX}）</FieldLabel>
-            <View style={{ flex: 1 }} />
-            <Pressable onPress={keepToGallery} disabled={busy} hitSlop={6}>
-              <Text style={{ color: C.gold, fontSize: 12, fontWeight: '700' }}>＋保留当前封面</Text>
-            </Pressable>
-          </View>
+          <FieldLabel>画廊（本地 {localGalleryCount}/{GALLERY_MAX} · 出图/上传自动存档）</FieldLabel>
           {gallery.length > 0 ? (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0 }} contentContainerStyle={{ gap: 8 }}>
               {gallery.map((entry) => (
                 <GalleryThumb
                   key={entry.id}
                   url={api ? api.coverGalleryImageUrl(projectId, entry.id) : null}
+                  tag={galleryTag(entry, promptItems)}
                   onPress={() => activateGalleryItem(entry)}
                   onLongPress={() => deleteGalleryItem(entry)}
                 />
               ))}
             </ScrollView>
-          ) : (
-            <Text style={{ color: C.text3, fontSize: 11, lineHeight: 16 }}>
-              重新出图/上传会覆盖当前封面；点「保留」先把满意的版本存进画廊（与提示词成对留档），随时可设回封面。
-            </Text>
-          )}
+          ) : null}
+          <Text style={{ color: C.text3, fontSize: 11, lineHeight: 16 }}>
+            {localGalleryCount >= GALLERY_MAX
+              ? '画廊已满，再出图/上传会自动替换最早的一张（当前封面不受影响），可长按缩略图删除腾位'
+              : '出图、上传、外链都会自动存进画廊（本地图最多 5 张，外链不限）；点缩略图设为封面、长按删除。'}
+          </Text>
         </View>
 
         {phase ? (

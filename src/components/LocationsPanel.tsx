@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 
 import { Chip, EmptyState, FieldLabel, Input, SelectField, SheetModal, Skeleton, useConfirm, useToast } from '@/components/ui';
+import { PortraitSheet } from '@/components/PortraitSheet';
 import type { LocationItem } from '@/lib/api';
 import { ApiError } from '@/lib/api';
 import { friendlyError, useAuth } from '@/lib/auth';
@@ -54,6 +55,7 @@ export function LocationsPanel({ projectId }: { projectId: number }) {
   const [aiType, setAiType] = useState('');
   const [aiReq, setAiReq] = useState('');
   const [aiSubmitting, setAiSubmitting] = useState(false);
+  const [portraitLoc, setPortraitLoc] = useState<LocationItem | null>(null);
   const [toast, toastNode] = useToast();
   const [confirm, confirmNode] = useConfirm();
 
@@ -224,6 +226,22 @@ export function LocationsPanel({ projectId }: { projectId: number }) {
                 </Text>
                 {l.location_type ? <Chip label={l.location_type} fg={C.green} bg={C.greenSoft} /> : null}
                 {l.danger_level && l.danger_level !== 'safe' ? <Chip label={DANGER_OPTIONS.find((d) => d.value === l.danger_level)?.label ?? l.danger_level} fg={dc.fg} bg={dc.bg} /> : null}
+                <Pressable
+                  onPress={() => setPortraitLoc(l)}
+                  hitSlop={6}
+                  style={{
+                    width: 30,
+                    height: 30,
+                    borderRadius: 10,
+                    backgroundColor: l.reference_image ? C.goldSoft : C.card2,
+                    borderWidth: 1,
+                    borderColor: l.reference_image ? 'rgba(229,181,88,0.35)' : C.borderSoft,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <Ionicons name="image-outline" size={15} color={l.reference_image ? C.gold : C.text3} />
+                </Pressable>
                 <Ionicons name="chevron-forward" size={14} color={C.text3} />
               </View>
               {l.atmosphere ? (
@@ -324,6 +342,17 @@ export function LocationsPanel({ projectId }: { projectId: number }) {
         </Pressable>
         <Text style={{ color: C.text3, fontSize: 11, lineHeight: 16, textAlign: 'center' }}>异步执行不占手机，完成后回本页下拉刷新</Text>
       </SheetModal>
+
+      {/* key=实体 id：换实体/重开整组件重挂载，状态初始化即实体当前值 */}
+      <PortraitSheet
+        key={portraitLoc ? `loc-portrait-${portraitLoc.id}` : 'loc-portrait-none'}
+        projectId={projectId}
+        kind="location"
+        entity={portraitLoc}
+        visible={portraitLoc !== null}
+        onClose={() => setPortraitLoc(null)}
+        onUpdated={load}
+      />
     </View>
   );
 }

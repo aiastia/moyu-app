@@ -568,7 +568,8 @@ export function CharactersPanel({ projectId }: { projectId: number }) {
       <PortraitSheet
         key={portraitChar ? `portrait-${portraitChar.id}` : 'portrait-none'}
         projectId={projectId}
-        character={portraitChar}
+        kind="character"
+        entity={portraitChar}
         visible={portraitChar !== null}
         onClose={() => setPortraitChar(null)}
         onUpdated={load}

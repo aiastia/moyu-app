@@ -203,7 +203,44 @@ export interface CharacterItem {
   aliases?: string[] | null;
   /** 多套装扮（[{name, description}]，立绘/封面按名选装）；NULL/空=未设置（按档案外貌出图） */
   outfits?: CharacterOutfit[] | null;
+  /** 立绘保留画廊（出图/上传自动入档；每视角本地 ≤5 条 + 外链不限） */
+  portrait_gallery?: PortraitGalleryEntry[] | null;
+  /** 立绘提示词版本列表（≤5 条；reference_prompt 兼容字段=工作字段恒最新） */
+  portrait_prompts?: PortraitPromptItem[] | null;
 }
+
+/** 立绘提示词版本条目（三实体 portrait_prompts，最多 5 条；view 为可选视角标注 single/turnaround） */
+export interface PortraitPromptItem {
+  id: string;
+  content: string;
+  view?: string;
+  rating?: number;
+  created_at?: string;
+}
+
+/** 立绘画廊条目（出图/上传/外链自动入档，prompt_id 关联「出自版本N」） */
+export interface PortraitGalleryEntry {
+  id: string;
+  view?: string;
+  prompt?: string;
+  prompt_id?: string;
+  image?: string;
+  created_at?: string;
+}
+
+/** 立绘宿主实体（角色/物品/地点三实体立绘面板共用最小形状） */
+export interface PortraitEntity {
+  id: number;
+  name: string;
+  reference_image?: string | null;
+  reference_prompt?: string | null;
+  portrait_gallery?: PortraitGalleryEntry[] | null;
+  portrait_prompts?: PortraitPromptItem[] | null;
+  outfits?: CharacterOutfit[] | null;
+}
+
+/** 立绘实体类型：决定 REST 路径段与全局图片端点前缀 */
+export type PortraitKind = 'character' | 'item' | 'location';
 
 /** 角色装扮条目（服务端 normalize_outfits 归一为 {name, description}，坏条目直接丢弃） */
 export interface CharacterOutfit {
@@ -219,10 +256,13 @@ export interface CoverPromptItem {
   created_at?: string;
 }
 
-/** 封面保留画廊条目（≤5 张；图片与提示词成对存档，重新出图/上传只覆盖主图不冲掉保留结果） */
+/** 封面保留画廊条目（出图/上传/外链自动入档，prompt_id 关联「出自版本N」） */
 export interface CoverGalleryEntry {
   id: string;
   prompt?: string;
+  prompt_id?: string;
+  image?: string;
+  created_at?: string;
   [k: string]: unknown;
 }
 
@@ -499,6 +539,10 @@ export interface LocationItem {
   importance?: string | null;
   danger_level?: string | null;
   first_appear_chapter?: number | null;
+  reference_image?: string | null;
+  reference_prompt?: string | null;
+  portrait_gallery?: PortraitGalleryEntry[] | null;
+  portrait_prompts?: PortraitPromptItem[] | null;
 }
 
 export interface ItemEntity {
@@ -511,6 +555,10 @@ export interface ItemEntity {
   obtained_chapter?: number | null;
   status?: string | null;
   is_key_item?: boolean | number | null;
+  reference_image?: string | null;
+  reference_prompt?: string | null;
+  portrait_gallery?: PortraitGalleryEntry[] | null;
+  portrait_prompts?: PortraitPromptItem[] | null;
 }
 
 export const ITEM_RARITY_LABEL: Record<string, string> = {
@@ -1786,11 +1834,12 @@ export class Api {
     });
   }
 
-  /** 用提示词生成封面图片（异步任务，结果通过 cover/image 查看）。quality 空串=走接口默认 */
-  coverImageAsync(projectId: number, prompt: string, size = '1024x1536', quality = '') {
+  /** 用提示词生成封面图片（异步任务，结果通过 cover/image 查看）。quality 空串=走接口默认；
+   *  promptId=出图所用提示词版本 id（画廊条目关联「出自版本N」） */
+  coverImageAsync(projectId: number, prompt: string, size = '1024x1536', quality = '', promptId = '') {
     return this.req<{ task_id: number }>(`/api/projects/${projectId}/cover/generate-image`, {
       method: 'POST',
-      body: JSON.stringify({ prompt, size, quality }),
+      body: JSON.stringify({ prompt, size, quality, prompt_id: promptId }),
     });
   }
 
@@ -1805,14 +1854,6 @@ export class Api {
   /** 删除单条封面提示词（腾出名额可再生成新的） */
   deleteCoverPromptItem(projectId: number, itemId: string) {
     return this.req<{ cover_prompts: CoverPromptItem[] }>(`/api/projects/${projectId}/cover/prompts/${itemId}`, { method: 'DELETE' });
-  }
-
-  /** 保留当前封面进画廊（复制主图为独立文件、与提示词成对存档，≤5 张） */
-  keepCoverGallery(projectId: number, prompt = '') {
-    return this.req<{ ok: boolean; cover_gallery: CoverGalleryEntry[] }>(`/api/projects/${projectId}/cover/gallery`, {
-      method: 'POST',
-      body: JSON.stringify({ prompt }),
-    });
   }
 
   /** 删除一条保留封面（图片文件一并删；若是当前封面则同步清空 cover_url） */
@@ -1834,35 +1875,145 @@ export class Api {
     return `${this.baseUrl}/api/projects/${projectId}/cover/gallery/${id8}/image`;
   }
 
-  // ===== 角色立绘 =====
-  portraitPromptAsync(projectId: number, characterId: number, body: { style: string; view: string; extra_requirements?: string; outfit?: string }) {
-    return this.req<{ task_id: number }>(`/api/projects/${projectId}/characters/${characterId}/portrait/generate-prompt`, {
+  // ===== 立绘（角色/物品/地点三实体同构：提示词版本 ≤5 条 + 画廊自动入档 + 上传/外链） =====
+  /** REST 路径段：character→characters / item→items / location→locations */
+  private portraitSeg(kind: PortraitKind) {
+    return kind === 'character' ? 'characters' : kind === 'item' ? 'items' : 'locations';
+  }
+
+  portraitPromptAsync(
+    projectId: number,
+    kind: PortraitKind,
+    entityId: number,
+    body: { style: string; view: string; extra_requirements?: string; outfit?: string; replace_prompt_id?: string },
+  ) {
+    return this.req<{ task_id: number }>(`/api/projects/${projectId}/${this.portraitSeg(kind)}/${entityId}/portrait/generate-prompt`, {
       method: 'POST',
       body: JSON.stringify(body),
     });
   }
 
-  /** 只存立绘提示词（不调 AI 不出图，直接落库 reference_prompt） */
-  savePortraitPrompt(projectId: number, characterId: number, prompt: string) {
-    return this.req<{ ok: boolean; reference_prompt: string }>(`/api/projects/${projectId}/characters/${characterId}/portrait/prompt`, {
-      method: 'PUT',
-      body: JSON.stringify({ prompt }),
-    });
+  /** 只存立绘提示词（不调 AI 不出图）：落库工作字段 + 自动归档为版本（同内容去重，满额只更新工作字段） */
+  savePortraitPrompt(projectId: number, kind: PortraitKind, entityId: number, prompt: string) {
+    return this.req<{ ok: boolean; reference_prompt: string; appended: boolean; portrait_prompts: PortraitPromptItem[] }>(
+      `/api/projects/${projectId}/${this.portraitSeg(kind)}/${entityId}/portrait/prompt`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ prompt }),
+      },
+    );
   }
 
-  portraitImageAsync(projectId: number, characterId: number, prompt: string, size = '1024x1536') {
-    return this.req<{ task_id: number }>(`/api/projects/${projectId}/characters/${characterId}/portrait/generate-image`, {
+  /** 改单条立绘提示词版本：content=正文 / rating=评分 / view=视角标注（变更联动画廊条目移组，响应带新画廊） */
+  updatePortraitPromptItem(projectId: number, kind: PortraitKind, entityId: number, itemId: string, body: { content?: string; rating?: number; view?: string }) {
+    return this.req<{ ok: boolean; portrait_prompts: PortraitPromptItem[]; portrait_gallery?: PortraitGalleryEntry[] }>(
+      `/api/projects/${projectId}/${this.portraitSeg(kind)}/${entityId}/portrait/prompts/${itemId}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(body),
+      },
+    );
+  }
+
+  /** 删除一条立绘提示词版本（画廊里出自它的图片保留，仅关联标注失效） */
+  deletePortraitPromptItem(projectId: number, kind: PortraitKind, entityId: number, itemId: string) {
+    return this.req<{ ok: boolean; portrait_prompts: PortraitPromptItem[] }>(
+      `/api/projects/${projectId}/${this.portraitSeg(kind)}/${entityId}/portrait/prompts/${itemId}`,
+      { method: 'DELETE' },
+    );
+  }
+
+  /** 用提示词生成立绘图（异步任务；view 供画廊按视角归档、prompt_id 关联提示词版本） */
+  portraitImageAsync(projectId: number, kind: PortraitKind, entityId: number, prompt: string, opts: { size?: string; view?: string; prompt_id?: string } = {}) {
+    return this.req<{ task_id: number }>(`/api/projects/${projectId}/${this.portraitSeg(kind)}/${entityId}/portrait/generate-image`, {
       method: 'POST',
-      body: JSON.stringify({ prompt, size }),
+      body: JSON.stringify({ prompt, size: opts.size ?? 'portrait', view: opts.view ?? 'single', prompt_id: opts.prompt_id ?? '' }),
     });
   }
 
-  deletePortraitImage(projectId: number, characterId: number) {
-    return this.req<{ ok: boolean }>(`/api/projects/${projectId}/characters/${characterId}/portrait/image`, { method: 'DELETE' });
+  /** 上传立绘图片（multipart ≤15MB）：转存 PNG 主图 + 自动入画廊（按视角归档、可关联提示词版本） */
+  uploadPortrait(
+    projectId: number,
+    kind: PortraitKind,
+    entityId: number,
+    file: { uri: string; name: string; type: string },
+    fields: { prompt?: string; view?: string; prompt_id?: string } = {},
+  ) {
+    return new Promise<{ ok: boolean; reference_image: string; notice: string; portrait_gallery: PortraitGalleryEntry[] }>((resolve, reject) => {
+      const fd = new FormData();
+      fd.append('file', { uri: file.uri, name: file.name, type: file.type } as unknown as Blob);
+      if (fields.prompt) fd.append('prompt', fields.prompt);
+      fd.append('view', fields.view ?? 'single');
+      if (fields.prompt_id) fd.append('prompt_id', fields.prompt_id);
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', `${this.baseUrl}/api/projects/${projectId}/${this.portraitSeg(kind)}/${entityId}/portrait/upload`);
+      xhr.setRequestHeader('Authorization', `Bearer ${this.token}`);
+      // Content-Type 由 XHR 自动带 multipart boundary，手动设置反而会坏（同封面上传）
+      xhr.timeout = 60_000;
+      xhr.onload = () => {
+        let j: { ok?: boolean; reference_image?: string; notice?: string; portrait_gallery?: PortraitGalleryEntry[]; detail?: string } | null = null;
+        try {
+          j = JSON.parse(xhr.responseText);
+        } catch {
+          j = null;
+        }
+        if (xhr.status >= 200 && xhr.status < 300 && j?.ok) {
+          resolve({ ok: true, reference_image: j.reference_image ?? '', notice: j.notice ?? '', portrait_gallery: j.portrait_gallery ?? [] });
+        } else {
+          reject(new ApiError(xhr.status, j?.detail || `上传失败（${xhr.status}）`));
+        }
+      };
+      xhr.onerror = () => reject(new ApiError(0, '网络错误，上传失败'));
+      xhr.ontimeout = () => reject(new ApiError(0, '上传超时，请重试'));
+      xhr.send(fd);
+    });
   }
 
-  portraitUrl(characterId: number) {
-    return `${this.baseUrl}/api/portraits/${characterId}/image`;
+  /** 把外部图床地址设为立绘（不落盘本地）：自动入画廊（外链不计额、同 URL 去重） */
+  setPortraitUrl(projectId: number, kind: PortraitKind, entityId: number, body: { url: string; prompt?: string; view?: string; prompt_id?: string }) {
+    return this.req<{ ok: boolean; reference_image: string; notice: string; portrait_gallery: PortraitGalleryEntry[] }>(
+      `/api/projects/${projectId}/${this.portraitSeg(kind)}/${entityId}/portrait/url`,
+      {
+        method: 'POST',
+        body: JSON.stringify(body),
+      },
+    );
+  }
+
+  /** 把画廊条目设为当前立绘（回写 reference_image/reference_prompt，视频编译参考图随之切换） */
+  activatePortraitGalleryItem(projectId: number, kind: PortraitKind, entityId: number, entryId: string) {
+    return this.req<{ ok: boolean; reference_image: string; reference_prompt: string; portrait_gallery: PortraitGalleryEntry[] }>(
+      `/api/projects/${projectId}/${this.portraitSeg(kind)}/${entityId}/portrait/gallery/${entryId}/activate`,
+      {
+        method: 'POST',
+        body: JSON.stringify({}),
+      },
+    );
+  }
+
+  /** 删除一条立绘画廊条目（图片文件一并删；若是当前主图则同步清空 reference_image） */
+  deletePortraitGalleryItem(projectId: number, kind: PortraitKind, entityId: number, entryId: string) {
+    return this.req<{ ok: boolean; portrait_gallery: PortraitGalleryEntry[] }>(
+      `/api/projects/${projectId}/${this.portraitSeg(kind)}/${entityId}/portrait/gallery/${entryId}`,
+      { method: 'DELETE' },
+    );
+  }
+
+  deletePortraitImage(projectId: number, kind: PortraitKind, entityId: number) {
+    return this.req<{ ok: boolean }>(`/api/projects/${projectId}/${this.portraitSeg(kind)}/${entityId}/portrait/image`, { method: 'DELETE' });
+  }
+
+  /** 立绘主图地址（全局鉴权端点，三实体前缀不同） */
+  portraitUrl(kind: PortraitKind, entityId: number) {
+    const seg = kind === 'character' ? 'portraits' : kind === 'item' ? 'item-portraits' : 'location-portraits';
+    return `${this.baseUrl}/api/${seg}/${entityId}/image`;
+  }
+
+  /** 立绘画廊图片地址（id8 为条目 id 的 8 位 hex 后缀；鉴权同主图） */
+  portraitGalleryImageUrl(kind: PortraitKind, entityId: number, entryId: string) {
+    const id8 = entryId.replace(/^pg_/, '');
+    const seg = kind === 'character' ? 'portraits' : kind === 'item' ? 'item-portraits' : 'location-portraits';
+    return `${this.baseUrl}/api/${seg}/${entityId}/gallery/${id8}/image`;
   }
 
   // ===== 角色装扮 =====
@@ -2148,27 +2299,29 @@ export class Api {
     return this.req<CharacterRelation[]>(`/api/projects/${projectId}/relations`);
   }
 
-  // ===== 封面上传 =====
+  // ===== 封面上传/外链 =====
   /** 上传本地封面（multipart ≤15MB）。走 XMLHttpRequest：RN 的 XHR 原生支持
-   *  FormData 的 {uri,name,type} 文件部件，不受 expo/fetch 全局覆盖的 FormData 实现差异影响。 */
-  uploadCover(projectId: number, file: { uri: string; name: string; type: string }) {
-    return new Promise<{ ok: boolean; cover_url: string; size: string }>((resolve, reject) => {
+   *  FormData 的 {uri,name,type} 文件部件，不受 expo/fetch 全局覆盖的 FormData 实现差异影响。
+   *  上传自动入画廊；promptId 可选=把这张图关联到提示词版本（画廊显示「出自版本N」）。 */
+  uploadCover(projectId: number, file: { uri: string; name: string; type: string }, promptId = '') {
+    return new Promise<{ ok: boolean; cover_url: string; size: string; notice: string; cover_gallery: CoverGalleryEntry[] }>((resolve, reject) => {
       const fd = new FormData();
       fd.append('file', { uri: file.uri, name: file.name, type: file.type } as unknown as Blob);
+      if (promptId) fd.append('prompt_id', promptId);
       const xhr = new XMLHttpRequest();
       xhr.open('POST', `${this.baseUrl}/api/projects/${projectId}/cover/upload`);
       xhr.setRequestHeader('Authorization', `Bearer ${this.token}`);
       // Content-Type 由 XHR 自动带 multipart boundary，手动设置反而会坏
       xhr.timeout = 60_000;
       xhr.onload = () => {
-        let j: { ok?: boolean; cover_url?: string; size?: string; detail?: string } | null = null;
+        let j: { ok?: boolean; cover_url?: string; size?: string; notice?: string; cover_gallery?: CoverGalleryEntry[]; detail?: string } | null = null;
         try {
           j = JSON.parse(xhr.responseText);
         } catch {
           j = null;
         }
         if (xhr.status >= 200 && xhr.status < 300 && j?.cover_url) {
-          resolve({ ok: true, cover_url: j.cover_url, size: j.size ?? '' });
+          resolve({ ok: true, cover_url: j.cover_url, size: j.size ?? '', notice: j.notice ?? '', cover_gallery: j.cover_gallery ?? [] });
         } else {
           reject(new ApiError(xhr.status, j?.detail || `上传失败（${xhr.status}）`));
         }
@@ -2179,11 +2332,12 @@ export class Api {
     });
   }
 
-  /** 直接把外部图床地址设为封面（http(s) 开头，不落盘本地） */
-  setCoverUrl(projectId: number, url: string) {
-    return this.req<{ ok: boolean; cover_url: string }>(`/api/projects/${projectId}/cover/url`, {
+  /** 直接把外部图床地址设为封面（http(s) 开头，不落盘本地）；自动入画廊（外链不计额），
+   *  promptId 可选=关联提示词版本 */
+  setCoverUrl(projectId: number, url: string, promptId = '') {
+    return this.req<{ ok: boolean; cover_url: string; notice?: string; cover_gallery?: CoverGalleryEntry[] }>(`/api/projects/${projectId}/cover/url`, {
       method: 'POST',
-      body: JSON.stringify({ url }),
+      body: JSON.stringify({ url, prompt_id: promptId }),
     });
   }
 
