@@ -19,7 +19,7 @@ interface AuthState {
 
 interface AuthContextValue extends AuthState {
   api: Api | null;
-  login: (rawUrl: string, username: string, password: string, remember?: boolean) => Promise<void>;
+  login: (rawUrl: string, username: string, password: string, remember?: boolean, captchaToken?: string) => Promise<void>;
   /** keepConfig=true（默认）：只清 token，保留服务器地址/账号/记住的密码——用于 401 过期等场景；显式退出登录用 keepConfig=false 全清 */
   logout: (opts?: { keepConfig?: boolean }) => Promise<void>;
   /** 本地更新当前用户信息（如个人偏好页改昵称后即时同步顶栏显示，并持久化） */
@@ -47,9 +47,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     })();
   }, []);
 
-  const login = useCallback(async (rawUrl: string, username: string, password: string, remember = false) => {
+  const login = useCallback(async (rawUrl: string, username: string, password: string, remember = false, captchaToken = '') => {
     const base = normalizeBaseUrl(rawUrl);
-    const { access_token, user } = await loginRequest(base, username.trim(), password);
+    const { access_token, user } = await loginRequest(base, username.trim(), password, captchaToken);
     const pairs: [string, string][] = [
       [KEY_BASE, base],
       [KEY_TOKEN, access_token],

@@ -5,6 +5,7 @@ import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-nati
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Input, ScreenHeader, StepperRow, Toggle, useToast } from '@/components/ui';
+import { TimelineCard } from '@/components/TimelineCard';
 import type { BestofOptions, CapabilityModule, FinalRoundCacheOptions, OutlineOptions, PromptModules, ThinkingModes } from '@/lib/api';
 import { ApiError } from '@/lib/api';
 import { friendlyError, useAuth } from '@/lib/auth';
@@ -101,6 +102,23 @@ export default function ProjectSettingsScreen() {
       rollback?.();
       await guard(e);
     }
+  };
+
+  /** 能力模块参数（声明式 params）：先改本地值，PUT params 失败回滚整个模块列表快照 */
+  const saveCapParam = (m: CapabilityModule, key: string, value: number) => {
+    const prev = capModules;
+    setCapModules(
+      (list) =>
+        (list ?? []).map((x) =>
+          x.name === m.name
+            ? { ...x, params: (x.params ?? []).map((p) => (p.key === key ? { ...p, value } : p)) }
+            : x,
+        ),
+    );
+    put(
+      () => api!.updateCapabilityModule(projectId, m.name, undefined, { [key]: value }),
+      () => setCapModules(prev),
+    );
   };
 
   const saveExclude = () => {
@@ -288,23 +306,53 @@ export default function ProjectSettingsScreen() {
         {capModules && capModules.length > 0 ? (
           <Card title="能力模块" hint="生成主链上的插件能力，改动立即生效；某环节出问题时可单独关停（如伏笔提醒清单脏了先关、先连写）">
             {capModules.map((m) => (
-              <Toggle
-                key={m.name}
-                label={m.enabled !== m.default_enabled ? `${m.title}（已改默认）` : m.title}
-                hint={m.desc}
-                value={m.enabled}
-                onChange={(v) => {
-                  const prev = capModules;
-                  setCapModules(capModules.map((x) => (x.name === m.name ? { ...x, enabled: v } : x)));
-                  put(
-                    () => api!.updateCapabilityModule(projectId, m.name, v),
-                    () => setCapModules(prev),
-                  );
-                }}
-              />
+              <View key={m.name} style={{ gap: 8 }}>
+                <Toggle
+                  label={m.enabled !== m.default_enabled ? `${m.title}（已改默认）` : m.title}
+                  hint={m.desc}
+                  value={m.enabled}
+                  onChange={(v) => {
+                    const prev = capModules;
+                    setCapModules(capModules.map((x) => (x.name === m.name ? { ...x, enabled: v } : x)));
+                    put(
+                      () => api!.updateCapabilityModule(projectId, m.name, v),
+                      () => setCapModules(prev),
+                    );
+                  }}
+                />
+                {(m.params ?? []).length > 0 ? (
+                  <View style={{ gap: 8, borderLeftWidth: 2, borderLeftColor: C.borderSoft, paddingLeft: 10, marginLeft: 2 }}>
+                    {m.params.map((p) =>
+                      p.type === 'bool' ? (
+                        <Toggle
+                          key={p.key}
+                          label={p.label ?? p.key}
+                          hint={p.hint}
+                          value={!!(p.value ?? p.default)}
+                          onChange={(v) => saveCapParam(m, p.key, v ? 1 : 0)}
+                        />
+                      ) : (
+                        <StepperRow
+                          key={p.key}
+                          label={p.label ?? p.key}
+                          hint={p.hint}
+                          value={Number(p.value ?? p.default ?? 0)}
+                          step={Number(p.step ?? 0.05)}
+                          min={Number(p.min ?? 0)}
+                          max={Number(p.max ?? 1)}
+                          onChange={(v) => saveCapParam(m, p.key, v)}
+                          format={(v) => String(Number(v.toFixed(2)))}
+                        />
+                      ),
+                    )}
+                  </View>
+                ) : null}
+              </View>
             ))}
           </Card>
         ) : null}
+
+        <TimelineCard projectId={projectId} />
 
         {thinking ? (
           <Card title="思考模式" hint="各环节是否启用模型的深度思考（更慢但更稳）">

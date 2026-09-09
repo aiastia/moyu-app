@@ -16,6 +16,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import icon from '../../assets/images/icon.png';
+import { CaptchaBox } from '@/components/CaptchaBox';
+import { fetchCaptchaConfig, normalizeBaseUrl, type CaptchaConfig } from '@/lib/api';
 import { friendlyError, loadSavedLoginInfo, useAuth } from '@/lib/auth';
 import { C, R, SP } from '@/lib/theme';
 
@@ -84,6 +86,10 @@ export default function LoginScreen() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [ready, setReady] = useState(false);
+  // 人机验证：公开配置在预填就绪后拉一次，服务器地址改动后防抖重拉（off/失败不渲染 widget）
+  const [captchaCfg, setCaptchaCfg] = useState<CaptchaConfig>({ provider: 'off', site_key: '' });
+  const [captchaToken, setCaptchaToken] = useState('');
+  const [captchaReset, setCaptchaReset] = useState(0);
 
   // 预填上次登录信息（token 过期被登出时，通常只需点一下登录）
   useEffect(() => {
@@ -96,6 +102,37 @@ export default function LoginScreen() {
     });
   }, []);
 
+  useEffect(() => {
+    if (!ready) return;
+    let alive = true;
+    const timer = setTimeout(async () => {
+      let cfg: CaptchaConfig = { provider: 'off', site_key: '' };
+      try {
+        cfg = await fetchCaptchaConfig(normalizeBaseUrl(url));
+      } catch {
+        // 地址空/非法或旧版本后端：按 off 处理
+      }
+      if (!alive) return;
+      setCaptchaCfg(cfg);
+      setCaptchaToken('');
+    }, 600);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
+  }, [url, ready]);
+
+  const needCaptcha = captchaCfg.provider !== 'off' && !!captchaCfg.site_key;
+  // widget 按域名校验站点钥：用服务器 origin 作为 WebView baseUrl（地址没填完时先不带）
+  let captchaOrigin = '';
+  if (needCaptcha) {
+    try {
+      captchaOrigin = normalizeBaseUrl(url);
+    } catch {
+      /* 地址空/非法：先渲染无 baseUrl 的 widget，提交校验会拦 */
+    }
+  }
+
   const doLogin = async () => {
     if (busy || !ready) return;
     setError('');
@@ -103,12 +140,21 @@ export default function LoginScreen() {
       setError('请填写服务器地址、用户名和密码');
       return;
     }
+    if (needCaptcha && !captchaToken) {
+      setError('请先完成人机验证');
+      return;
+    }
     setBusy(true);
     try {
-      await login(url, username, password, remember);
+      await login(url, username, password, remember, needCaptcha ? captchaToken : '');
       router.replace('/');
     } catch (e) {
       setError(e instanceof Error ? e.message : '登录失败，请重试');
+      // token 一次性（siteverify 已消费）：失败后必须重验，否则重试永远撞重复
+      if (needCaptcha) {
+        setCaptchaToken('');
+        setCaptchaReset((v) => v + 1);
+      }
     } finally {
       setBusy(false);
     }
@@ -145,6 +191,18 @@ export default function LoginScreen() {
                 secure={!showPwd}
                 toggle={() => setShowPwd((v) => !v)}
               />
+
+              {needCaptcha ? (
+                <CaptchaBox
+                  key={`${captchaCfg.provider}:${captchaCfg.site_key}`}
+                  provider={captchaCfg.provider as 'recaptcha' | 'turnstile'}
+                  siteKey={captchaCfg.site_key}
+                  origin={captchaOrigin}
+                  resetKey={captchaReset}
+                  onToken={setCaptchaToken}
+                  onExpire={() => setCaptchaToken('')}
+                />
+              ) : null}
 
               <Pressable onPress={() => setRemember((v) => !v)} style={{ flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 2 }}>
                 <View

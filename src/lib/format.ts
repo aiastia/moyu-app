@@ -81,3 +81,32 @@ export const STATUS_LABEL: Record<string, string> = {
   cancelled: '已取消',
   cancelling: '取消中',
 };
+
+/**
+ * Outline.story_time → 人读一行（后端 timeline_service.format_anchor 的 App 版）。
+ * 数据是 AI 填的相对量（gap_display/span_display）+ 程序累加的绝对天（start_day/end_day），
+ * 空对象返回空串（渲染处按无锚点处理）。
+ */
+export function formatStoryTime(st?: Record<string, unknown> | null): string {
+  if (!st || typeof st !== 'object') return '';
+  const str = (k: string) => String((st as Record<string, unknown>)[k] ?? '').trim();
+  const num = (k: string): number | null => {
+    const v = (st as Record<string, unknown>)[k];
+    return typeof v === 'number' && Number.isFinite(v) ? v : null;
+  };
+  const parts: string[] = [];
+  const start = str('start_display');
+  const gap = str('gap_display');
+  const span = str('span_display');
+  const end = str('end_display');
+  if (start) parts.push(`开始于${start}`);
+  if (gap && !gap.includes('开始')) parts.push(`距上章${gap}`);
+  if (span) parts.push(`章内经过${span}`);
+  else if (end && start && end !== start) parts.push(`章内至${end}`);
+  const sd = num('start_day');
+  const ed = num('end_day');
+  if (sd != null && ed != null) {
+    parts.push(ed > sd ? `（故事第${sd + 1}-${ed + 1}天）` : `（故事第${sd + 1}天）`);
+  }
+  return parts.join('，');
+}

@@ -17,7 +17,7 @@ import { PendingEntitiesCard } from '@/components/PendingEntitiesCard';
 import type { ChapterRow, OutlineItem, ProjectDetail, ShortReview, StoryCard, WritingStyleItem } from '@/lib/api';
 import { ApiError } from '@/lib/api';
 import { friendlyError, loadLastRead, useAuth } from '@/lib/auth';
-import { fmtDate, fmtPercent, fmtRelative, fmtWords, STORY_KIND_LABEL } from '@/lib/format';
+import { fmtDate, formatStoryTime, fmtPercent, fmtRelative, fmtWords, STORY_KIND_LABEL } from '@/lib/format';
 import { C, R, SP } from '@/lib/theme';
 
 /** 大纲场景（服务端 scenes 数组的单条），编辑表单里的可变形态 */
@@ -784,7 +784,9 @@ export default function ProjectScreen() {
                       </Pressable>
                     ) : null}
                   </View>
-                  {outlines.map((o) => (
+                  {outlines.map((o) => {
+                    const anchor = formatStoryTime(o.story_time);
+                    return (
                     <Pressable
                       key={o.id}
                       onPress={() => openOutlineDetail(o)}
@@ -807,13 +809,23 @@ export default function ProjectScreen() {
                         ) : null}
                         <Ionicons name="chevron-forward" size={14} color={C.text3} />
                       </View>
+                      {anchor ? (
+                        /* 故事时间线锚点（AI 填相对量+程序累加绝对天）：翻大纲即看全书时间流 */
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                          <Ionicons name="time-outline" size={11} color={C.text3} />
+                          <Text style={{ color: C.text3, fontSize: 11, flex: 1 }} numberOfLines={1}>
+                            {anchor}
+                          </Text>
+                        </View>
+                      ) : null}
                       {o.summary ? (
                         <Text style={{ color: C.text2, fontSize: 12, lineHeight: 18 }} numberOfLines={2}>
                           {o.summary}
                         </Text>
                       ) : null}
                     </Pressable>
-                  ))}
+                    );
+                  })}
                   <PendingEntitiesCard projectId={projectId} />
                 </View>
               )

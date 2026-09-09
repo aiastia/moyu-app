@@ -170,6 +170,8 @@ export interface OutlineItem {
   /** 1→N 模式：该卷是否已展开成章 / 展开的章数 */
   has_chapters?: boolean;
   chapter_count?: number;
+  /** 故事时间线锚点（后端原样 JSON：gap_display/span_display/start_day/end_day 等） */
+  story_time?: Record<string, unknown> | null;
 }
 
 export interface CharacterItem {
@@ -273,7 +275,56 @@ export interface CapabilityModule {
   enabled: boolean;
   default_enabled: boolean;
   desc: string;
-  params: { key: string; value?: number; [k: string]: unknown }[];
+  /** 声明式参数（后端 meta.params）：type=bool 渲染开关，否则数字步进；value 缺省回落 default */
+  params: {
+    key: string;
+    label?: string;
+    value?: number;
+    default?: number;
+    min?: number;
+    max?: number;
+    step?: number;
+    /** "bool" = 0/1 开关语义 */
+    type?: string;
+    hint?: string;
+    [k: string]: unknown;
+  }[];
+}
+
+/** 大事年表事件（event_day：第1章第1天=0，故事开始前为负，如七年前=-2555） */
+export interface TimelineEvent {
+  id: number;
+  name: string;
+  /** backstory=故事开始前 / plot=故事进行中 / world=世界观历史 */
+  event_type: string;
+  time_display: string;
+  description: string;
+  event_day: number | null;
+  related_characters: string[];
+  chapter_number: number | null;
+  /** manual=手工录入（最高权威）/ outline=大纲锚点 / backfill=AI回填 / analysis=AI提取 */
+  source: string;
+  confidence?: number | null;
+  updated_at?: string | null;
+}
+
+export interface TimelineEventInput {
+  name: string;
+  event_type: string;
+  time_display: string;
+  description: string;
+  event_day: number | null;
+  related_characters: string[];
+  chapter_number: number | null;
+}
+
+/** GET /timeline 一次拉全：事件列表 + 一致性警告 + 锚点覆盖统计 */
+export interface TimelineRes {
+  events: TimelineEvent[];
+  warnings: string[];
+  anchored_count: number;
+  chapter_count: number;
+  anchors: { chapter_number: number; anchor: string; start_day: number | null }[];
 }
 
 export interface TaskItem {
@@ -999,6 +1050,7 @@ export const TASK_TYPE_LABEL: Record<string, string> = {
   org_member_assign: '组织成员分配',
   inspire: '灵感方案',
   story_arc: '全书弧线',
+  timeline_backfill: '时间线回填',
   skill_gen_career_system_generation: '技能生成·职业体系',
   skill_gen_locations_generate: '技能生成·地点',
   skill_gen_items_generate: '技能生成·物品',
@@ -1022,15 +1074,37 @@ export function normalizeBaseUrl(raw: string): string {
   return u;
 }
 
+/** 登录/注册页人机验证的公开配置（无鉴权端点；旧后端无此路由=off，前端不渲染 widget） */
+export interface CaptchaConfig {
+  provider: 'off' | 'recaptcha' | 'turnstile';
+  site_key: string;
+}
+
+/** 拉人机验证公开配置。任何失败（地址错/旧版本 404/网络断）都按 off 处理，不阻塞登录表单 */
+export async function fetchCaptchaConfig(baseUrl: string): Promise<CaptchaConfig> {
+  try {
+    const res = await fetch(`${baseUrl}/api/auth/captcha-config`);
+    if (!res.ok) return { provider: 'off', site_key: '' };
+    const j = (await res.json()) as { provider?: string; site_key?: string };
+    if (j?.provider === 'recaptcha' || j?.provider === 'turnstile') {
+      return { provider: j.provider, site_key: j.site_key || '' };
+    }
+    return { provider: 'off', site_key: '' };
+  } catch {
+    return { provider: 'off', site_key: '' };
+  }
+}
+
 export async function loginRequest(
   baseUrl: string,
   username: string,
   password: string,
+  captchaToken = '',
 ): Promise<{ access_token: string; user: LoginUser }> {
   const res = await fetch(`${baseUrl}/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, password }),
+    body: JSON.stringify({ username, password, captcha_token: captchaToken }),
   });
   if (res.status === 401 || res.status === 400 || res.status === 422) {
     let msg = '用户名或密码错误';
@@ -2030,11 +2104,44 @@ export class Api {
     return this.req<{ modules: CapabilityModule[] }>(`/api/projects/${projectId}/capability-modules`);
   }
 
-  /** 启停单个能力模块（存 project.settings.capability_modules，改动立即生效） */
-  updateCapabilityModule(projectId: number, name: string, enabled: boolean) {
-    return this.req<{ ok: boolean; name: string; enabled: boolean }>(`/api/projects/${projectId}/capability-modules`, {
+  /** 启停能力模块 / 改模块参数（存 project.settings.capability_modules|capability_params，改动立即生效） */
+  updateCapabilityModule(projectId: number, name: string, enabled?: boolean, params?: Record<string, number>) {
+    return this.req<{ ok: boolean; name: string; enabled: boolean; params?: Record<string, number> }>(`/api/projects/${projectId}/capability-modules`, {
       method: 'PUT',
-      body: JSON.stringify({ name, enabled }),
+      body: JSON.stringify({ name, ...(enabled !== undefined ? { enabled } : {}), ...(params ? { params } : {}) }),
+    });
+  }
+
+  // ===== 故事时间线账本（大事年表 CRUD + 一致性警告 + 存量回填任务） =====
+  getTimeline(projectId: number) {
+    return this.req<TimelineRes>(`/api/projects/${projectId}/timeline`);
+  }
+
+  createTimelineEvent(projectId: number, body: TimelineEventInput) {
+    return this.req<TimelineEvent>(`/api/projects/${projectId}/timeline/events`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
+  updateTimelineEvent(projectId: number, eventId: number, body: Partial<TimelineEventInput>) {
+    return this.req<TimelineEvent>(`/api/projects/${projectId}/timeline/events/${eventId}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    });
+  }
+
+  deleteTimelineEvent(projectId: number, eventId: number) {
+    return this.req<{ ok: boolean }>(`/api/projects/${projectId}/timeline/events/${eventId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  /** 提交时间线存量回填后台任务（补空锚点章节 + 重建年表，不覆盖已有；进度看任务页） */
+  backfillTimeline(projectId: number) {
+    return this.req<{ task_id: number }>(`/api/projects/${projectId}/timeline/backfill`, {
+      method: 'POST',
+      body: JSON.stringify({}),
     });
   }
 
