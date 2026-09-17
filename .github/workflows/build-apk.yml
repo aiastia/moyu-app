@@ -70,7 +70,11 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      - uses: android-actions/setup-android@v4
+      # setup-android@v4 自 2026-09 runner 镜像更新后必挂（其内部 sdkmanager tools
+      # 撞上已废弃下架的 SDK 'tools' 包）。runner 本身预装完整 SDK，这里只需接受
+      # 许可，gradle 缺什么包会凭已接受许可自动下载。
+      - name: Accept Android SDK licenses
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1 || true
 
       - name: Type check
         run: npx tsc --noEmit
