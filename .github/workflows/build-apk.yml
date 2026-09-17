@@ -156,6 +156,10 @@ jobs:
       - name: Build release APK
         working-directory: android
         run: ./gradlew assembleRelease --stacktrace
+        env:
+          # 登录页默认服务器地址：Metro 打包时内联进 JS bundle（构建期注入，源码不落明文）。
+          # secret 未配置时为空 = 无默认地址，登录页保持手填（公开仓库的 fork 构建同理）。
+          EXPO_PUBLIC_DEFAULT_SERVER_URL: ${{ secrets.DEFAULT_SERVER_URL }}
 
       # 缓存回写：只在手动构建（main scope）时保存——tag 构建写了也只存在
       # 自己 tag 名下（别的构建读不到），纯占配额。key 与上面三个 restore

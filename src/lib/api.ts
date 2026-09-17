@@ -1900,11 +1900,39 @@ export class Api {
   }
 
   // ===== 封面 =====
-  /** AI 生成封面提示词（异步任务，新词追加进 projects.cover_prompts 列表尾部，读最新一条要取列表末位） */
-  coverPromptAsync(projectId: number) {
+  /** AI 生成封面提示词（异步任务，新词追加进 projects.cover_prompts 列表尾部，读最新一条要取列表末位）。
+   *  生成偏好全可选；不传/空串=后端 auto 自选档，行为与旧版空参一致 */
+  coverPromptAsync(
+    projectId: number,
+    opts?: {
+      style?: string;
+      font?: string;
+      fontSub?: string;
+      lighting?: string;
+      palette?: string;
+      tone?: string;
+      /** 画幅口径 portrait_2_3 等（提示词里的比例措辞；与出图 size 是两个参数） */
+      ratio?: string;
+      /** 构图/姿态要求（如"两人对坐"），留空不注入 */
+      compositionHint?: string;
+      /** 深度取材：拉蓝图/近章大纲/主角人设提炼招牌画面素材 */
+      deep?: boolean;
+    },
+  ) {
+    const o = opts ?? {};
     return this.req<{ task_id: number }>(`/api/projects/${projectId}/cover/generate-prompt`, {
       method: 'POST',
-      body: JSON.stringify({}),
+      body: JSON.stringify({
+        cover_style: o.style || 'auto',
+        cover_font: o.font || 'auto',
+        cover_font_sub: o.fontSub || 'auto',
+        cover_lighting: o.lighting || 'auto',
+        cover_palette: o.palette || 'auto',
+        cover_tone: o.tone || 'auto',
+        cover_ratio: o.ratio || '',
+        cover_composition_hint: o.compositionHint || '',
+        deep: o.deep ?? false,
+      }),
     });
   }
 

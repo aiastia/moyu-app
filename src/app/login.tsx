@@ -21,6 +21,19 @@ import { fetchCaptchaConfig, normalizeBaseUrl, type CaptchaConfig } from '@/lib/
 import { friendlyError, loadSavedLoginInfo, useAuth } from '@/lib/auth';
 import { C, R, SP } from '@/lib/theme';
 
+/** 默认服务器地址：构建期注入（CI 走 repo secret，本地开发放 .env.local），源码/仓库不落明文；
+ *  未注入时为空串，登录页保持完全手填（公开仓库构建的 APK 不携带任何默认地址） */
+const DEFAULT_SERVER_URL = process.env.EXPO_PUBLIC_DEFAULT_SERVER_URL ?? '';
+
+/** 归一化后比较两个服务器地址是否同一台（尾斜杠/末尾 /api/缺协议视为等价） */
+function sameServer(a: string, b: string): boolean {
+  try {
+    return normalizeBaseUrl(a) === normalizeBaseUrl(b);
+  } catch {
+    return false;
+  }
+}
+
 function Field({
   icon,
   label,
@@ -78,7 +91,10 @@ function Field({
 
 export default function LoginScreen() {
   const { login } = useAuth();
+  const hasDefault = !!DEFAULT_SERVER_URL;
   const [url, setUrl] = useState('');
+  // 自定义服务器勾选：无内置默认地址（未注入 secret 的构建）时恒展开地址栏，保持全手填
+  const [customServer, setCustomServer] = useState(false);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPwd, setShowPwd] = useState(false);
@@ -91,16 +107,27 @@ export default function LoginScreen() {
   const [captchaToken, setCaptchaToken] = useState('');
   const [captchaReset, setCaptchaReset] = useState(0);
 
-  // 预填上次登录信息（token 过期被登出时，通常只需点一下登录）
+  // 预填上次登录信息（token 过期被登出时，通常只需点一下登录）。
+  // 上次连的是内置默认服务器 → 不勾自定义、走默认地址；连过其他服务器 → 自动勾选并回填。
   useEffect(() => {
     loadSavedLoginInfo().then((info) => {
-      setUrl(info.baseUrl);
+      const saved = info.baseUrl.trim();
+      const useCustom = !!saved && (!hasDefault || !sameServer(saved, DEFAULT_SERVER_URL));
+      setCustomServer(!hasDefault || useCustom);
+      setUrl(useCustom ? saved : DEFAULT_SERVER_URL);
       setUsername(info.username);
       setPassword(info.password);
       setRemember(info.remember);
       setReady(true);
     });
-  }, []);
+  }, [hasDefault]);
+
+  // 取消自定义 → 地址栏回到内置默认；勾上 → 保留当前地址作为修改起点
+  const toggleCustomServer = () => {
+    const next = !customServer;
+    setCustomServer(next);
+    if (!next) setUrl(DEFAULT_SERVER_URL);
+  };
 
   useEffect(() => {
     if (!ready) return;
@@ -136,8 +163,12 @@ export default function LoginScreen() {
   const doLogin = async () => {
     if (busy || !ready) return;
     setError('');
-    if (!url.trim() || !username.trim() || !password) {
-      setError('请填写服务器地址、用户名和密码');
+    const missing: string[] = [];
+    if (!url.trim()) missing.push('服务器地址');
+    if (!username.trim()) missing.push('用户名');
+    if (!password) missing.push('密码');
+    if (missing.length) {
+      setError(`请填写${missing.join('、')}`);
       return;
     }
     if (needCaptcha && !captchaToken) {
@@ -180,7 +211,9 @@ export default function LoginScreen() {
             </View>
 
             <View style={{ backgroundColor: 'rgba(21,25,38,0.88)', borderRadius: R.xl, borderWidth: 1, borderColor: '#262C3F', padding: SP.l, gap: 16 }}>
-              <Field icon="server-outline" label="服务器地址" value={url} onChangeText={setUrl} placeholder="https://your-server.com" />
+              {!hasDefault || customServer ? (
+                <Field icon="server-outline" label="服务器地址" value={url} onChangeText={setUrl} placeholder="https://your-server.com" />
+              ) : null}
               <Field icon="person-outline" label="用户名" value={username} onChangeText={setUsername} placeholder="用户名" />
               <Field
                 icon="lock-closed-outline"
@@ -191,6 +224,26 @@ export default function LoginScreen() {
                 secure={!showPwd}
                 toggle={() => setShowPwd((v) => !v)}
               />
+
+              {hasDefault ? (
+                <Pressable onPress={toggleCustomServer} style={{ flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 2 }}>
+                  <View
+                    style={{
+                      width: 20,
+                      height: 20,
+                      borderRadius: 6,
+                      borderWidth: 1.5,
+                      borderColor: customServer ? C.gold : '#3A4154',
+                      backgroundColor: customServer ? C.gold : 'transparent',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    {customServer ? <Ionicons name="checkmark" size={13} color="#1A1206" /> : null}
+                  </View>
+                  <Text style={{ color: C.text2, fontSize: 13 }}>自定义服务器地址</Text>
+                </Pressable>
+              ) : null}
 
               {needCaptcha ? (
                 <CaptchaBox

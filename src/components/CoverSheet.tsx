@@ -3,18 +3,19 @@ import * as ImagePicker from 'expo-image-picker';
 import { useState } from 'react';
 import { ActivityIndicator, Image, Pressable, ScrollView, Text, View } from 'react-native';
 
-import { Chip, FieldLabel, Input, SheetModal, useConfirm, useToast } from '@/components/ui';
+import { Chip, FieldLabel, Input, SelectField, SheetModal, useConfirm, useToast } from '@/components/ui';
 import type { CoverGalleryEntry, CoverPromptItem } from '@/lib/api';
+import { COVER_FONTS, COVER_FONT_SUBS, COVER_LIGHTINGS, COVER_PALETTES, COVER_STYLES, COVER_TONES } from '@/lib/coverPresets';
 import { friendlyError, useAuth } from '@/lib/auth';
 import { clearAuthImageCache, useAuthImage } from '@/lib/image';
 import { pollTask } from '@/lib/tasks';
 import { C, R } from '@/lib/theme';
 
 const SIZES = [
-  { key: '1024x1536', label: '竖版 2:3' },
-  { key: '864x1536', label: '竖版 9:16' },
-  { key: '1024x1024', label: '方形 1:1' },
-  { key: '1536x864', label: '横版 16:9' },
+  { key: '1024x1536', label: '竖版 2:3', ratio: 'portrait_2_3' },
+  { key: '864x1536', label: '竖版 9:16', ratio: 'portrait_9_16' },
+  { key: '1024x1024', label: '方形 1:1', ratio: 'square_1_1' },
+  { key: '1536x864', label: '横版 16:9', ratio: 'landscape_16_9' },
 ];
 
 /** 清晰度档位：空串=走接口默认（dall-e 系列不认该参数，服务端白名单外不传） */
@@ -91,6 +92,16 @@ export function CoverSheet({ projectId, initialPrompt, onCoverChanged }: { proje
   const [prompt, setPrompt] = useState('');
   const [size, setSize] = useState('1024x1536');
   const [quality, setQuality] = useState('');
+  // 生成偏好（全默认 auto=与旧版空参一致；展开「生成偏好」区可指定档位）
+  const [advOpen, setAdvOpen] = useState(false);
+  const [style, setStyle] = useState('auto');
+  const [font, setFont] = useState('auto');
+  const [fontSub, setFontSub] = useState('auto');
+  const [lighting, setLighting] = useState('auto');
+  const [palette, setPalette] = useState('auto');
+  const [tone, setTone] = useState('auto');
+  const [compHint, setCompHint] = useState('');
+  const [deep, setDeep] = useState(false);
   const [busy, setBusy] = useState(false);
   const [phase, setPhase] = useState('');
   const [toast, toastNode] = useToast();
@@ -134,12 +145,25 @@ export function CoverSheet({ projectId, initialPrompt, onCoverChanged }: { proje
     syncProject().catch(() => {});
   };
 
+  /** 当前表单的生成偏好；ratio 跟随所选出图尺寸（提示词比例措辞与实际出图一致） */
+  const promptOpts = () => ({
+    style,
+    font,
+    fontSub,
+    lighting,
+    palette,
+    tone,
+    ratio: SIZES.find((s) => s.key === size)?.ratio ?? '',
+    compositionHint: compHint.trim(),
+    deep,
+  });
+
   const genPrompt = async () => {
     if (!api || busy) return;
     setBusy(true);
     setPhase('提示词生成中…');
     try {
-      const r = await api.coverPromptAsync(projectId);
+      const r = await api.coverPromptAsync(projectId, promptOpts());
       await pollTask(api, r.task_id, { onTick: (t) => setPhase(`提示词 ${t.progress ?? 0}%`) });
       const { items } = (await syncProject()) ?? { items: [] };
       if (items.length) {
@@ -184,7 +208,7 @@ export function CoverSheet({ projectId, initialPrompt, onCoverChanged }: { proje
     setBusy(true);
     setPhase('提示词生成中…');
     try {
-      const p = await api.coverPromptAsync(projectId);
+      const p = await api.coverPromptAsync(projectId, promptOpts());
       await pollTask(api, p.task_id, { onTick: (t) => setPhase(`提示词 ${t.progress ?? 0}%`) });
       const { items } = (await syncProject()) ?? { items: [] };
       const finalPrompt = items.length ? items[items.length - 1].content : '';
@@ -426,6 +450,47 @@ export function CoverSheet({ projectId, initialPrompt, onCoverChanged }: { proje
               );
             })}
           </View>
+
+          <Pressable onPress={() => setAdvOpen((v) => !v)} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 4 }}>
+            <Ionicons name={advOpen ? 'chevron-down' : 'chevron-forward'} size={14} color={C.text3} />
+            <Text style={{ color: C.text3, fontSize: 12.5, fontWeight: '600' }}>生成偏好（质感/字体/光线/配色…）</Text>
+            {!advOpen ? <Text style={{ color: C.text3, fontSize: 11.5 }}>全部自动</Text> : null}
+          </Pressable>
+
+          {advOpen ? (
+            <View style={{ gap: 10 }}>
+              <SelectField label="质感画风" value={style} options={COVER_STYLES} onChange={setStyle} />
+              <SelectField label="书名字体" value={font} options={COVER_FONTS} onChange={setFont} />
+              <SelectField label="辅助字体（作者名/副标题）" value={fontSub} options={COVER_FONT_SUBS} onChange={setFontSub} />
+              <SelectField label="光线" value={lighting} options={COVER_LIGHTINGS} onChange={setLighting} />
+              <SelectField label="配色方案" value={palette} options={COVER_PALETTES} onChange={setPalette} />
+              <SelectField label="整体明度" value={tone} options={COVER_TONES} onChange={setTone} />
+              <View style={{ gap: 7 }}>
+                <FieldLabel>构图 / 姿态要求（可选）</FieldLabel>
+                <Input value={compHint} onChangeText={setCompHint} placeholder="如：两人对坐、男主只露剪影" />
+              </View>
+              <Pressable onPress={() => setDeep((v) => !v)} style={{ flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 2 }}>
+                <View
+                  style={{
+                    width: 20,
+                    height: 20,
+                    borderRadius: 6,
+                    borderWidth: 1.5,
+                    borderColor: deep ? C.gold : '#3A4154',
+                    backgroundColor: deep ? C.gold : 'transparent',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  {deep ? <Ionicons name="checkmark" size={13} color="#1A1206" /> : null}
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: C.text2, fontSize: 13 }}>深度取材（按剧情提炼招牌画面）</Text>
+                  <Text style={{ color: C.text3, fontSize: 11, marginTop: 2 }}>拉蓝图主线/近章大纲/主角人设注入生成，更贴合实况但更慢</Text>
+                </View>
+              </Pressable>
+            </View>
+          ) : null}
         </View>
 
         {promptItems.length > 0 ? (

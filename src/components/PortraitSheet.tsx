@@ -10,16 +10,29 @@ import { clearAuthImageCache, useAuthImage } from '@/lib/image';
 import { pollTask } from '@/lib/tasks';
 import { C, R } from '@/lib/theme';
 
+// 画风清单与后端 art_styles.py / 封面词表同源（2026-09-17 同步：写实→手绘→动漫渐变排序 20 款 + auto）
 const STYLES = [
   { key: 'auto', label: '自动·按题材' },
+  { key: 'photo', label: '纪实摄影' },
+  { key: 'semi_realistic', label: '轻写实厚涂' },
+  { key: 'film', label: '胶片写实' },
+  { key: 'film_cinema', label: '日系胶片电影' },
+  { key: 'cinematic', label: '电影感插画' },
+  { key: 'hk_retro', label: '港风复古' },
+  { key: 'korean_illust', label: '韩系唯美' },
+  { key: 'healing', label: '治愈水彩' },
+  { key: 'soft_focus', label: '梦幻柔光' },
+  { key: 'vintage', label: '法式复古' },
+  { key: 'ghibli', label: '吉卜力' },
+  { key: 'ink', label: '新中式水墨' },
+  { key: 'gongbi', label: '工笔重彩' },
+  { key: 'new_chinese_commercial', label: '新国风商业' },
+  { key: 'epic_fantasy', label: '史诗奇幻厚涂' },
   { key: 'game_cg', label: '游戏CG' },
   { key: 'anime', label: '日系动漫' },
   { key: 'guofeng', label: '新国风' },
-  { key: 'ghibli', label: '吉卜力' },
-  { key: 'healing', label: '治愈水彩' },
-  { key: 'ink', label: '水墨' },
-  { key: 'film', label: '写实胶片' },
-  { key: 'photo', label: '纪实摄影' },
+  { key: 'cel', label: '赛璐璐' },
+  { key: 'flat_illustration', label: '高级平涂' },
 ];
 
 const VIEWS = [
