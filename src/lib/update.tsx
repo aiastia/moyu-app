@@ -28,8 +28,15 @@ interface InstallerModule {
   installApk(path: string): Promise<boolean>;
 }
 
-const Installer: InstallerModule | null =
-  Platform.OS === 'android' ? requireNativeModule<InstallerModule>('MoyuInstaller') : null;
+/** 兜底 try/catch：模块没链进包里时降级为「无更新功能」，绝不能让根布局导入即崩（v2.6.0 闪退教训） */
+const Installer: InstallerModule | null = (() => {
+  if (Platform.OS !== 'android') return null;
+  try {
+    return requireNativeModule<InstallerModule>('MoyuInstaller');
+  } catch {
+    return null;
+  }
+})();
 
 export const isUpdateSupported = Installer != null;
 

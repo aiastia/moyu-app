@@ -48,3 +48,10 @@ example
 # expo prebuild 本地产物不入库（CI 每次重新 prebuild）
 android/
 ios/
+
+# 例外：本地 Expo 模块（modules/）的 android/ 子目录是源码必须入库——
+# 上面的 android/ 规则匹配任意深度目录，会把 modules/*/android/ 一并吃掉（v2.6.0 闪退事故根因）；
+# 模块内 gradle 产物目录 build/ 仍不入库
+!modules/**/android/
+!modules/**/android/**
+modules/**/android/build/

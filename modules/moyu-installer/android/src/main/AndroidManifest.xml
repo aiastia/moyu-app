@@ -1,0 +1,24 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <!-- 应用内自更新：安装下载好的 APK 需要「安装未知应用」授权的前提权限声明 -->
+  <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+  <!-- Android 11+ 包可见性：ACTION_VIEW 拉起系统包安装器前需声明要解析的 intent -->
+  <queries>
+    <intent>
+      <action android:name="android.intent.action.VIEW" />
+      <data android:mimeType="application/vnd.android.package-archive" />
+    </intent>
+  </queries>
+  <application>
+    <!-- 只暴露本应用 cache/files 目录给系统安装器读取；authority 后缀勿改，Kotlin 侧用
+         "${packageName}.moyuupdate.provider" 拼接 -->
+    <provider
+        android:name="androidx.core.content.FileProvider"
+        android:authorities="${applicationId}.moyuupdate.provider"
+        android:exported="false"
+        android:grantUriPermissions="true">
+      <meta-data
+          android:name="android.support.FILE_PROVIDER_PATHS"
+          android:resource="@xml/moyu_update_file_paths" />
+    </provider>
+  </application>
+</manifest>
