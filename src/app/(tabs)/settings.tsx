@@ -6,9 +6,10 @@ import { useCallback, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { ScreenHeader, useConfirm } from '@/components/ui';
+import { ScreenHeader, useConfirm, useToast } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
 import { C, R, SP } from '@/lib/theme';
+import { isUpdateSupported, useUpdate, type UpdatePhase } from '@/lib/update';
 
 function Card({ children }: { children: React.ReactNode }) {
   return (
@@ -34,13 +35,42 @@ function Row({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMap; lab
   );
 }
 
+/** 设置页「检查更新」行的右侧状态文案 */
+function updateStatusText(s: UpdatePhase): { text: string; highlight: boolean } {
+  switch (s.phase) {
+    case 'checking':
+      return { text: '正在检查…', highlight: false };
+    case 'uptodate':
+      return { text: `已是最新 v${s.versionName}`, highlight: false };
+    case 'available':
+      return { text: `发现新版本 v${s.info.versionName}`, highlight: true };
+    case 'downloading': {
+      const pct = s.total > 0 ? Math.round((s.received / s.total) * 100) : 0;
+      return { text: `下载中 ${pct}%`, highlight: true };
+    }
+    case 'downloaded':
+      return { text: '已下载，待安装', highlight: true };
+    case 'error':
+      return { text: '检查失败，点按重试', highlight: false };
+    default:
+      return { text: '自动检查 GitHub 新版', highlight: false };
+  }
+}
+
 export default function SettingsScreen() {
   const { user, baseUrl, logout } = useAuth();
   const [busy, setBusy] = useState(false);
   const [confirm, confirmNode] = useConfirm();
+  const [toast, toastNode] = useToast();
+  const { state: upState, check } = useUpdate();
 
   const name = user?.nickname || user?.username || '未登录';
   const initial = name.trim()[0] ?? '墨';
+
+  const doCheckUpdate = useCallback(async () => {
+    const msg = await check(true);
+    if (msg) toast(msg);
+  }, [check, toast]);
 
   const doLogout = useCallback(() => {
     confirm({
@@ -60,6 +90,7 @@ export default function SettingsScreen() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: C.bg }} edges={['top']}>
       {confirmNode}
+      {toastNode}
       <ScrollView contentContainerStyle={{ flexGrow: 1, padding: SP.l, gap: 14, paddingBottom: 40 }}>
         <ScreenHeader title="设置" />
 
@@ -159,6 +190,31 @@ export default function SettingsScreen() {
         <Card>
           <Text style={{ color: C.text2, fontSize: 12, fontWeight: '700' }}>关于</Text>
           <Row icon="information-circle-outline" label="版本" value={`墨鱼写作 v${Constants.expoConfig?.version ?? '1.0'}`} />
+          {isUpdateSupported ? (
+            <Pressable
+              onPress={() => void doCheckUpdate()}
+              disabled={upState.phase === 'checking'}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 11 }}
+            >
+              <View style={{ width: 34, height: 34, borderRadius: 11, backgroundColor: C.card2, alignItems: 'center', justifyContent: 'center' }}>
+                {upState.phase === 'checking' ? (
+                  <ActivityIndicator size="small" color={C.gold} />
+                ) : (
+                  <Ionicons name="cloud-download-outline" size={16} color={C.gold} />
+                )}
+              </View>
+              <View style={{ flex: 1, gap: 1 }}>
+                <Text style={{ color: C.text3, fontSize: 11 }}>检查更新</Text>
+                <Text
+                  style={{ color: updateStatusText(upState).highlight ? C.gold : C.text, fontSize: 14, fontWeight: '600' }}
+                  numberOfLines={1}
+                >
+                  {updateStatusText(upState).text}
+                </Text>
+              </View>
+              <Ionicons name="refresh-outline" size={15} color={C.text3} />
+            </Pressable>
+          ) : null}
           <Pressable onPress={() => Linking.openURL('https://github.com/aiastia/moyu-app')} style={{ flexDirection: 'row', alignItems: 'center', gap: 11 }}>
             <View style={{ width: 34, height: 34, borderRadius: 11, backgroundColor: C.card2, alignItems: 'center', justifyContent: 'center' }}>
               <Ionicons name="logo-github" size={16} color={C.gold} />

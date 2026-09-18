@@ -5,6 +5,7 @@ import { useEffect } from 'react';
 
 import { AuthProvider, useAuth } from '@/lib/auth';
 import { C } from '@/lib/theme';
+import { UpdateProvider } from '@/lib/update';
 
 SplashScreen.preventAutoHideAsync().catch(() => undefined);
 
@@ -57,7 +58,9 @@ export const unstable_settings = {
 export default function RootLayout() {
   return (
     <AuthProvider>
-      <Root />
+      <UpdateProvider>
+        <Root />
+      </UpdateProvider>
     </AuthProvider>
   );
 }
