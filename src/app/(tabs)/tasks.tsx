@@ -34,6 +34,23 @@ function statusStyle(status: string): { fg: string; bg: string } {
   }
 }
 
+/** 已用时长：运行中=开始(缺省回落创建)→现在，终态=开始→完成定格；排队中不算已用 */
+function elapsedOf(task: TaskItem): string | null {
+  if (task.status === 'pending') return null;
+  const start = task.started_at ?? task.created_at;
+  if (!start) return null;
+  const end = task.status === 'running' ? Date.now() : task.completed_at ? new Date(task.completed_at).getTime() : null;
+  if (!end) return null;
+  let s = Math.max(0, Math.floor((end - new Date(start).getTime()) / 1000));
+  const h = Math.floor(s / 3600);
+  s %= 3600;
+  const m = Math.floor(s / 60);
+  s %= 60;
+  if (h > 0) return `${h}小时${m}分`;
+  if (m > 0) return `${m}分${s}秒`;
+  return `${s}秒`;
+}
+
 /** memo：页面每 10s 轮询刷新列表，无变化的卡片跳过重渲（回调必须传稳定引用）
  *  child=子任务：缩进 + 左侧 hairline 连接线，嵌套在父任务下（一键连写轮次的归属可见化） */
 const TaskCard = memo(function TaskCard({ task, child, onOpen, onCancel, onRetry }: { task: TaskItem; child?: boolean; onOpen: (t: TaskItem) => void; onCancel: (t: TaskItem) => void; onRetry: (t: TaskItem) => void }) {
@@ -80,6 +97,7 @@ const TaskCard = memo(function TaskCard({ task, child, onOpen, onCancel, onRetry
         <Text style={{ color: C.text3, fontSize: 11, flex: 1 }} numberOfLines={1}>
           {task.created_at ? fmtRelative(task.created_at) : ''}
           {active && task.progress ? ` · ${task.progress}%` : ''}
+          {task.status === 'running' && elapsedOf(task) ? ` · 已用 ${elapsedOf(task)}` : ''}
         </Text>
         {active && !task.cancel_requested ? (
           <Pressable
@@ -192,6 +210,7 @@ function TaskDetailSheet({
       <InfoLine label="创建" value={task.created_at ? fmtRelative(task.created_at) : undefined} />
       <InfoLine label="开始" value={task.started_at ? fmtRelative(task.started_at) : undefined} />
       <InfoLine label="完成" value={task.completed_at ? fmtRelative(task.completed_at) : undefined} />
+      <InfoLine label="已用" value={elapsedOf(task) ?? undefined} />
       <InfoLine label="重试次数" value={task.retry_count != null && task.max_retries != null ? `${task.retry_count}/${task.max_retries}` : undefined} />
 
       <View style={{ flexDirection: 'row', gap: 10, marginTop: 4, flexWrap: 'wrap' }}>

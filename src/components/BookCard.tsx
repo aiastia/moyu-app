@@ -55,6 +55,7 @@ export function BookCard({
           {book.tag ? <Chip label={book.tag} fg={C.gold} bg={C.goldSoft} bold /> : null}
           <Chip label={kind} fg={isShortKind ? C.purple : C.blue} bg={isShortKind ? C.purpleSoft : C.blueSoft} />
           {book.outline_mode === 'one_to_many' ? <Chip label="细化模式" fg={C.green} bg={C.greenSoft} /> : null}
+          {book.pen_name ? <Chip label={book.pen_name} fg={C.text2} bg={C.card2} /> : null}
           {subCount > 0 ? <Chip label={`已投 ${subCount}`} fg={C.gold} bg={C.goldSoft} /> : null}
           {statusChip && serialStatus !== 'active' ? (
             <Chip
@@ -74,6 +75,13 @@ export function BookCard({
           已写 {book.written_chapter_count ?? 0}/{book.chapter_count ?? 0} 章 · {fmtWords(book.current_word_count)}
           {book.target_word_count ? ` / ${fmtWords(book.target_word_count)}目标` : ''}
         </Text>
+        {/* 长篇有蓝图分篇规划时显示规划进度（已写/规划最末章 + 已详划篇数/分篇总数），与工作台同口径 */}
+        {!isShortKind && (book.planned_chapter_count ?? 0) > 0 ? (
+          <Text style={{ color: C.text3, fontSize: 11 }}>
+            规划 {book.planned_chapter_count} 章
+            {(book.volume_total_count ?? 0) > 0 ? ` · 分篇 ${book.volume_planned_count ?? 0}/${book.volume_total_count} 已详划` : ''}
+          </Text>
+        ) : null}
         <ProgressBar pct={pct} />
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
           <Text style={{ color: C.text3, fontSize: 11 }} numberOfLines={1}>

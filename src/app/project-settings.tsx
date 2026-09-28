@@ -6,7 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Input, ScreenHeader, StepperRow, Toggle, useToast } from '@/components/ui';
 import { TimelineCard } from '@/components/TimelineCard';
-import type { BestofOptions, CapabilityModule, FinalRoundCacheOptions, OutlineOptions, PromptModules, ThinkingModes } from '@/lib/api';
+import type { BestofOptions, CapabilityModule, FinalRoundCacheOptions, OutlineOptions, PromptModules } from '@/lib/api';
 import { ApiError } from '@/lib/api';
 import { friendlyError, useAuth } from '@/lib/auth';
 import { C, R, SP } from '@/lib/theme';
@@ -24,15 +24,7 @@ function Card({ title, hint, children, busy }: { title: string; hint?: string; c
   );
 }
 
-const THINKING_MODE_LABEL: Record<string, string> = {
-  world: '世界观生成',
-  character: '角色生成',
-  outline: '大纲生成',
-  expand: '大纲展开',
-  chapter: '正文生成',
-  polish: '润色',
-  analysis: '剧情分析',
-};
+const MODE_HINT = '思考模式已升级为全账号一份：在「设置 → 思考模式」中配置，对所有书统一生效';
 
 /** 项目设定：把网页端「项目设置」里移动端高频的开关搬过来，改一项存一项 */
 export default function ProjectSettingsScreen() {
@@ -49,7 +41,6 @@ export default function ProjectSettingsScreen() {
   const [finalRound, setFinalRound] = useState<FinalRoundCacheOptions | null>(null);
   const [modules, setModules] = useState<PromptModules | null>(null);
   const [capModules, setCapModules] = useState<CapabilityModule[] | null>(null);
-  const [thinking, setThinking] = useState<ThinkingModes | null>(null);
   const [englishExclude, setEnglishExclude] = useState<string | null>(null);
   const [savingExclude, setSavingExclude] = useState(false);
   const [extraRules, setExtraRules] = useState<string | null>(null);
@@ -79,7 +70,6 @@ export default function ProjectSettingsScreen() {
       api.getFinalRoundCache(projectId).then(setFinalRound).catch(() => undefined),
       api.getPromptModules(projectId).then(setModules).catch(() => undefined),
       api.getCapabilityModules(projectId).then((r) => setCapModules(r.modules ?? [])).catch(() => undefined),
-      api.getThinkingModes(projectId).then((r) => setThinking(r.modes)).catch(() => undefined),
       api.getEnglishExclude(projectId).then((r) => setEnglishExclude(r.english_scan_exclude ?? '')).catch(() => setEnglishExclude('')),
       api.getExtraWritingRules(projectId).then((r) => setExtraRules(r.extra_writing_rules ?? '')).catch(() => setExtraRules('')),
       api.getAutoRelation(projectId).then((r) => setAutoRelation(r.auto_relation_on_create)).catch(() => setAutoRelation(null)),
@@ -354,31 +344,6 @@ export default function ProjectSettingsScreen() {
 
         <TimelineCard projectId={projectId} />
 
-        {thinking ? (
-          <Card title="思考模式" hint="各环节是否启用模型的深度思考（更慢但更稳）">
-            {Object.keys(THINKING_MODE_LABEL).map((key) => {
-              const m = thinking[key];
-              if (!m) return null;
-              return (
-                <Toggle
-                  key={key}
-                  label={THINKING_MODE_LABEL[key] ?? key}
-                  value={m.enabled}
-                  onChange={(v) => {
-                    const prev = thinking;
-                    const next = { ...thinking, [key]: { ...m, enabled: v } };
-                    setThinking(next);
-                    put(
-                      () => api!.updateThinkingModes(projectId, next),
-                      () => setThinking(prev),
-                    );
-                  }}
-                />
-              );
-            })}
-          </Card>
-        ) : null}
-
         {finalRound ? (
           <Card title="终轮稳定性" hint="生成最后一步的工具与格式约束，乱码/跑偏时开">
             <Toggle
@@ -453,6 +418,7 @@ export default function ProjectSettingsScreen() {
           )}
         </Card>
 
+        <Text style={{ color: C.text3, fontSize: 11, lineHeight: 16, textAlign: 'center' }}>{MODE_HINT}</Text>
         <Text style={{ color: C.text3, fontSize: 11, lineHeight: 16, textAlign: 'center' }}>同人设定、AI 模型等低频配置请在网页端管理</Text>
       </ScrollView>
     </SafeAreaView>

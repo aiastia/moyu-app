@@ -16,7 +16,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Chip, FieldLabel, Input, SelectField, SheetModal, Toggle, useConfirm, useToast } from '@/components/ui';
 import { ShortReviewView } from '@/components/ShortReviewView';
-import type { ChapterFull, ChapterSegmentRow, RegenTask } from '@/lib/api';
+import type { ChapterFull, ChapterSegmentRow, RegenTask, ZhuqueReport } from '@/lib/api';
 import { ApiError } from '@/lib/api';
 import { friendlyError, useAuth } from '@/lib/auth';
 import { fmtRelative } from '@/lib/format';
@@ -51,7 +51,7 @@ const REGEN_STATUS_LABEL: Record<string, string> = {
 };
 
 /** AI 工具弹窗的子页（segs=段列表，seg:N=第 N 段详情） */
-type ToolPage = 'menu' | 'polish' | 'regen' | 'history' | `history:${number}` | 'restore' | 'segs' | `seg:${number}` | 'shortreview';
+type ToolPage = 'menu' | 'polish' | 'regen' | 'history' | `history:${number}` | 'restore' | 'segs' | `seg:${number}` | 'shortreview' | 'zhuque';
 
 const BODY_LINE_HEIGHT = 24;
 const BODY_MIN_HEIGHT = 240;
@@ -361,6 +361,26 @@ export default function EditorScreen() {
     });
   };
 
+  // ===== 朱雀 AI 检测（用户自配 EdgeOne Makers Key；有缓存回缓存，force 重测） =====
+  const [zhuqueReport, setZhuqueReport] = useState<ZhuqueReport | null>(null);
+  const [zhuqueCached, setZhuqueCached] = useState<boolean | null>(null);
+  const [zhuqueBusy, setZhuqueBusy] = useState(false);
+  const [zhuqueErr, setZhuqueErr] = useState('');
+
+  const runZhuque = (force: boolean) => {
+    if (!api || zhuqueBusy) return;
+    setZhuqueBusy(true);
+    setZhuqueErr('');
+    api
+      .zhuqueDetectChapter(projectId, chapterId, force)
+      .then((r) => {
+        setZhuqueReport(r.report);
+        setZhuqueCached(r.cached);
+      })
+      .catch((e) => setZhuqueErr(friendlyError(e)))
+      .finally(() => setZhuqueBusy(false));
+  };
+
   const openTool = (page: ToolPage) => {
     setToolPage(page);
     if (page === 'history') {
@@ -373,6 +393,8 @@ export default function EditorScreen() {
           toast(friendlyError(e));
         });
     }
+    // 朱雀检测：打开即查一次（服务端有缓存直接回缓存不烧额度）
+    if (page === 'zhuque') runZhuque(false);
   };
 
   const submitPolish = () => {
@@ -489,9 +511,11 @@ export default function EditorScreen() {
                 ? '分段写作'
                 : toolPage === 'shortreview'
                   ? '短篇审稿'
-                  : toolPage && toolPage.startsWith('seg:')
-                    ? `第 ${Number(toolPage.slice('seg:'.length))} 段`
-                    : '';
+                  : toolPage === 'zhuque'
+                    ? '朱雀 AI 检测'
+                    : toolPage && toolPage.startsWith('seg:')
+                      ? `第 ${Number(toolPage.slice('seg:'.length))} 段`
+                      : '';
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
@@ -736,6 +760,13 @@ export default function EditorScreen() {
               title="重写历史"
               sub="历次重写草稿对比与应用（回滚也在这里）"
               onPress={() => openTool('history')}
+            />
+            <MenuRow
+              icon="pulse-outline"
+              color={C.green}
+              title="朱雀 AI 检测"
+              sub={zhuqueReport ? `上次检测：人工率 ${zhuqueReport.human_ratio != null ? Math.round(zhuqueReport.human_ratio * 100) + '%' : '—'}` : '用朱雀测本章 AI 率（需在个人偏好配置 Key）'}
+              onPress={() => openTool('zhuque')}
             />
             {storyKind === 'short' || storyKind === 'single' ? (
               <MenuRow
@@ -1033,7 +1064,58 @@ export default function EditorScreen() {
               任务完成后点这里刷新结果
             </Text>
           </>
-        ) : null}
+        ) : toolPage === 'zhuque' ? (
+          zhuqueBusy ? (
+            <View style={{ alignItems: 'center', gap: 10, paddingVertical: 30 }}>
+              <ActivityIndicator size="large" color={C.gold} />
+              <Text style={{ color: C.text3, fontSize: 12.5 }}>正在送检本章正文…</Text>
+            </View>
+          ) : zhuqueErr ? (
+            <View style={{ gap: 12 }}>
+              <Text style={{ color: C.seal, fontSize: 12.5, lineHeight: 19, textAlign: 'center', paddingVertical: 8 }}>{zhuqueErr}</Text>
+              {zhuqueErr.includes('未配置') || zhuqueErr.includes('Key') ? (
+                <Text style={{ color: C.text3, fontSize: 11.5, lineHeight: 17, textAlign: 'center' }}>
+                  到「设置 → 个人偏好 → 朱雀 AI 检测」粘贴腾讯 EdgeOne Makers Key 即可使用
+                </Text>
+              ) : null}
+              <Pressable
+                onPress={() => runZhuque(false)}
+                style={{ height: 44, borderRadius: R.m, backgroundColor: C.card2, borderWidth: 1, borderColor: C.border, alignItems: 'center', justifyContent: 'center' }}
+              >
+                <Text style={{ color: C.text2, fontSize: 14, fontWeight: '600' }}>重试</Text>
+              </Pressable>
+            </View>
+          ) : zhuqueReport ? (
+            <View style={{ gap: 12 }}>
+              <View style={{ flexDirection: 'row', gap: 9 }}>
+                {[
+                  { label: '人工率', v: zhuqueReport.human_ratio, color: C.green },
+                  { label: 'AI 率', v: zhuqueReport.ai_ratio, color: C.seal },
+                  { label: '疑似', v: zhuqueReport.suspect_ratio, color: C.gold },
+                ].map((it) => (
+                  <View key={it.label} style={{ flex: 1, backgroundColor: C.card2, borderRadius: R.m, paddingVertical: 13, alignItems: 'center', gap: 4 }}>
+                    <Text style={{ color: it.color, fontSize: 21, fontWeight: '800' }}>{it.v != null ? `${Math.round(it.v * 100)}%` : '—'}</Text>
+                    <Text style={{ color: C.text3, fontSize: 11 }}>{it.label}</Text>
+                  </View>
+                ))}
+              </View>
+              <Text style={{ color: C.text3, fontSize: 11.5, lineHeight: 17, textAlign: 'center' }}>
+                {zhuqueCached ? '上次检测结果（缓存），正文改过可强制重测' : '本次实时检测'}
+                {zhuqueReport.detected_at ? ` · ${fmtRelative(zhuqueReport.detected_at)}` : ''}
+              </Text>
+              <Pressable
+                onPress={() => runZhuque(true)}
+                disabled={zhuqueBusy}
+                style={{ height: 44, borderRadius: R.m, backgroundColor: C.card2, borderWidth: 1, borderColor: C.border, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 7 }}
+              >
+                <Ionicons name="refresh-outline" size={15} color={C.text2} />
+                <Text style={{ color: C.text2, fontSize: 14, fontWeight: '600' }}>强制重测（消耗检测额度）</Text>
+              </Pressable>
+              <Text style={{ color: C.text3, fontSize: 11, lineHeight: 16, textAlign: 'center' }}>
+                检测走你自配的腾讯 EdgeOne Makers Key，服务端代理调用
+              </Text>
+            </View>
+          ) : null) : null}
       </SheetModal>
     </View>
   );

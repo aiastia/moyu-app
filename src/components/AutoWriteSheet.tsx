@@ -4,11 +4,28 @@ import { useState } from 'react';
 import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 
 import { FieldLabel, Input, SheetModal, Toggle, useConfirm, useToast } from '@/components/ui';
+import type { AutoWritePreview } from '@/lib/api';
 import { friendlyError, useAuth } from '@/lib/auth';
 import { C, R } from '@/lib/theme';
 
 const TOTAL_OPTIONS = [5, 10, 20, 30, 50];
 const BATCH_OPTIONS = [3, 5];
+
+/** 篇幅规划提示（preview 端点四态口径：放下/自动详划接续/钳终点/无规划） */
+function fitHint(preview: AutoWritePreview, total: number): string {
+  const targetEnd = preview.written_chapters + total;
+  const plannedMax = preview.volumes.length ? preview.volumes[preview.volumes.length - 1].end_chapter : 0;
+  if (!preview.volumes.length) {
+    return `已写 ${preview.written_chapters} 章。本书暂无分篇规划，将按大纲继续续写（当前大纲到第 ${preview.outline_max} 章）。`;
+  }
+  if (plannedMax >= targetEnd) {
+    return `已写 ${preview.written_chapters} 章，本次将写到第 ${targetEnd} 章，在分篇规划（至第 ${plannedMax} 章）内。`;
+  }
+  if (preview.book_volume_count > preview.volumes.length) {
+    return `已写 ${preview.written_chapters} 章，超出规划终点第 ${plannedMax} 章的部分会自动详划下一篇（共 ${preview.book_volume_count} 卷）接续写完。`;
+  }
+  return `规划只到第 ${plannedMax} 章且全部已详划，本次实际只会写到规划终点即停（目标 ${targetEnd} 章写不满）。`;
+}
 
 function PickChips({ options, value, onChange, suffix = '' }: { options: number[]; value: number; onChange: (v: number) => void; suffix?: string }) {
   return (
@@ -51,8 +68,16 @@ export function AutoWriteSheet({ projectId }: { projectId: number }) {
   const [analysis, setAnalysis] = useState(true);
   const [direction, setDirection] = useState('');
   const [busy, setBusy] = useState(false);
+  // 篇幅规划提示（长篇才有；拉不到就静默不显）
+  const [preview, setPreview] = useState<AutoWritePreview | null>(null);
   const [toast, toastNode] = useToast();
   const [confirm, confirmNode] = useConfirm();
+
+  const openSheet = () => {
+    setOpen(true);
+    setPreview(null);
+    api?.autoWritePreview(projectId).then(setPreview).catch(() => undefined);
+  };
 
   const submit = async () => {
     if (!api || busy) return;
@@ -85,7 +110,7 @@ export function AutoWriteSheet({ projectId }: { projectId: number }) {
       {toastNode}
       {confirmNode}
       <Pressable
-        onPress={() => setOpen(true)}
+        onPress={openSheet}
         style={({ pressed }) => ({
           flexDirection: 'row',
           alignItems: 'center',
@@ -104,6 +129,11 @@ export function AutoWriteSheet({ projectId }: { projectId: number }) {
         <Text style={{ color: C.text3, fontSize: 12, lineHeight: 18 }}>
           自动循环「续写大纲 → 批量写正文」，直到在现有进度上加满所选章数。写满即停。
         </Text>
+        {preview ? (
+          <View style={{ backgroundColor: C.card2, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 9 }}>
+            <Text style={{ color: C.text2, fontSize: 11.5, lineHeight: 17 }}>{fitHint(preview, total)}</Text>
+          </View>
+        ) : null}
         <View style={{ gap: 9 }}>
           <FieldLabel>本次新增章数</FieldLabel>
           <PickChips options={TOTAL_OPTIONS} value={total} onChange={setTotal} suffix=" 章" />

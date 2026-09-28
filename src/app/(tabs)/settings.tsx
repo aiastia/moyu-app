@@ -172,6 +172,30 @@ export default function SettingsScreen() {
             </View>
             <Ionicons name="chevron-forward" size={15} color={C.text3} />
           </Pressable>
+          <Pressable onPress={() => router.push('/thinking-modes')} style={{ flexDirection: 'row', alignItems: 'center', gap: 11 }}>
+            <View style={{ width: 34, height: 34, borderRadius: 11, backgroundColor: C.card2, alignItems: 'center', justifyContent: 'center' }}>
+              <Ionicons name="bulb-outline" size={16} color={C.gold} />
+            </View>
+            <View style={{ flex: 1, gap: 1 }}>
+              <Text style={{ color: C.text3, fontSize: 11 }}>思考模式</Text>
+              <Text style={{ color: C.text, fontSize: 14, fontWeight: '600' }} numberOfLines={1}>
+                各生成环节的深度思考开关（全账号）
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={15} color={C.text3} />
+          </Pressable>
+          <Pressable onPress={() => router.push('/memories')} style={{ flexDirection: 'row', alignItems: 'center', gap: 11 }}>
+            <View style={{ width: 34, height: 34, borderRadius: 11, backgroundColor: C.card2, alignItems: 'center', justifyContent: 'center' }}>
+              <Ionicons name="library-outline" size={16} color={C.gold} />
+            </View>
+            <View style={{ flex: 1, gap: 1 }}>
+              <Text style={{ color: C.text3, fontSize: 11 }}>作者记忆</Text>
+              <Text style={{ color: C.text, fontSize: 14, fontWeight: '600' }} numberOfLines={1}>
+                跨作品的偏好/红线/节奏纪律
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={15} color={C.text3} />
+          </Pressable>
           <Pressable onPress={() => router.push('/model-channels')} style={{ flexDirection: 'row', alignItems: 'center', gap: 11 }}>
             <View style={{ width: 34, height: 34, borderRadius: 11, backgroundColor: C.card2, alignItems: 'center', justifyContent: 'center' }}>
               <Ionicons name="hardware-chip-outline" size={16} color={C.gold} />

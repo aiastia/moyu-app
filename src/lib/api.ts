@@ -9,8 +9,15 @@ export interface Book {
   desc?: string | null;
   chapter_count: number;
   written_chapter_count: number;
+  /** 篇幅规划最大章（蓝图分篇规划的最末 end_chapter；无蓝图=0，展示回退 chapter_count） */
+  planned_chapter_count?: number;
+  /** 分篇进度：已详划篇数 / 蓝图分篇总数（书架「分篇 x/y」） */
+  volume_planned_count?: number;
+  volume_total_count?: number;
   target_word_count: number;
   current_word_count: number;
+  /** 该书笔名（建书时从用户默认带出，每本可单独改） */
+  pen_name?: string | null;
   updated?: string | null;
   tag?: string | null;
   /** 后端与 tag 同值的类型原文（tag 是兜底"其他"后的值，搜索用 genre 原文） */
@@ -256,6 +263,22 @@ export interface CoverPromptItem {
   content: string;
   rating?: number;
   created_at?: string;
+  /** 两段式生成的第一段设计说明（20260927 起随新词落库；旧条目无此字段） */
+  design_notes?: CoverDesignNotes | null;
+}
+
+/** 封面设计说明（两段式第一段的九字段 JSON 契约，随提示词条目外显） */
+export interface CoverDesignNotes {
+  hook?: string;
+  hook_uniqueness?: string;
+  main_focus?: string;
+  props?: { name?: string; source?: string }[];
+  frozen_moment?: string;
+  background_symbols?: string[];
+  light?: string;
+  clear_symbol?: string;
+  contrast?: string;
+  [k: string]: unknown;
 }
 
 /** 封面保留画廊条目（出图/上传/外链自动入档，prompt_id 关联「出自版本N」） */
@@ -756,6 +779,52 @@ export interface PromptModules {
 }
 
 export type ThinkingModes = Record<string, { enabled: boolean; reasoning_effort?: string; temperature?: number }>;
+
+/** 作者记忆条目（用户级记忆库：跨作品生效的偏好/红线/节奏纪律，注入正文/大纲/润色三面） */
+export interface UserMemory {
+  id: number;
+  content: string;
+  category?: string;
+  enabled: boolean;
+  priority: number;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+/** 朱雀 AIGC 检测报告（compact_report 口径，比率 0-1） */
+export interface ZhuqueReport {
+  human_ratio?: number;
+  ai_ratio?: number;
+  suspect_ratio?: number;
+  softmax_confidence?: number;
+  quota_tokens?: number;
+  detected_at?: string;
+  [k: string]: unknown;
+}
+
+/** 朱雀 key 配置读取（key 恒不回明文：已配置回「•••••」掩码） */
+export interface ZhuqueConfig {
+  api_key: string;
+  configured: boolean;
+}
+
+/** AI 换名候选（任务 result.candidates；不落库，挑选后走 updateProject title） */
+export interface TitleSuggestResult {
+  candidates?: { title: string; reason?: string }[];
+  old_title?: string;
+  hints?: string[];
+  note?: string;
+  [k: string]: unknown;
+}
+
+/** 一键连写弹窗篇幅规划提示（preview 端点；仅长篇用） */
+export interface AutoWritePreview {
+  written_chapters: number;
+  outline_max: number;
+  /** book 级蓝图镜像篇数：> volumes 行数 = 还有未详划的后续篇（越界将自动详划接续） */
+  book_volume_count: number;
+  volumes: { index: number; title: string; start_chapter: number; end_chapter: number }[];
+}
 
 export interface SourceCanonOptions {
   source_canon: string;
@@ -1879,12 +1948,59 @@ export class Api {
   updatePromptModules(projectId: number, modules: Record<string, boolean>) {
     return this.req<{ ok: boolean }>(`/api/projects/${projectId}/prompt-modules`, { method: 'PUT', body: JSON.stringify({ modules }) });
   }
-  getThinkingModes(projectId: number) {
-    return this.req<{ modes: ThinkingModes }>(`/api/projects/${projectId}/thinking-modes`);
+
+  // ===== 思考模式（20260928 从项目级提升为全账号一份：/api/users/thinking-modes） =====
+  getUserThinkingModes() {
+    return this.req<{ modes: ThinkingModes }>('/api/users/thinking-modes');
   }
-  updateThinkingModes(projectId: number, modes: ThinkingModes) {
-    return this.req<{ ok: boolean }>(`/api/projects/${projectId}/thinking-modes`, { method: 'PUT', body: JSON.stringify({ modes }) });
+  updateUserThinkingModes(modes: ThinkingModes) {
+    return this.req<{ ok: boolean }>('/api/users/thinking-modes', { method: 'PUT', body: JSON.stringify({ modes }) });
   }
+
+  // ===== 作者记忆（用户级记忆库，跨作品注入正文/大纲/润色） =====
+  listUserMemories() {
+    return this.req<{ items: UserMemory[] }>('/api/user/memories');
+  }
+  createUserMemory(body: { content: string; category?: string; enabled?: boolean; priority?: number }) {
+    return this.req<UserMemory>('/api/user/memories', { method: 'POST', body: JSON.stringify(body) });
+  }
+  updateUserMemory(id: number, body: { content: string; category?: string; enabled?: boolean; priority?: number }) {
+    return this.req<UserMemory>(`/api/user/memories/${id}`, { method: 'PUT', body: JSON.stringify(body) });
+  }
+  deleteUserMemory(id: number) {
+    return this.req<{ ok: boolean }>(`/api/user/memories/${id}`, { method: 'DELETE' });
+  }
+
+  // ===== 朱雀 AIGC 检测（用户自配 EdgeOne Makers Key，服务端代理调用） =====
+  getZhuqueConfig() {
+    return this.req<ZhuqueConfig>('/api/user/zhuque-config');
+  }
+  /** 保存 key：「•••••」=保留已存值，空串=清除配置；格式对不对由 testZhuqueConfig 实测 */
+  updateZhuqueConfig(apiKey: string) {
+    return this.req<{ ok: boolean }>('/api/user/zhuque-config', { method: 'PUT', body: JSON.stringify({ api_key: apiKey }) });
+  }
+  /** 用已存 key 检测一小段样文校验配置（烧一点免费额度） */
+  testZhuqueConfig() {
+    return this.req<{ ok: boolean; report: ZhuqueReport }>('/api/user/zhuque-config/test', { method: 'POST' });
+  }
+  /** 检测章节正文 AI 率（有缓存直接回缓存；force 重测。400=未配置 key） */
+  zhuqueDetectChapter(projectId: number, chapterId: number, force = false) {
+    return this.req<{ cached: boolean; chapter_id: number; report: ZhuqueReport }>(
+      `/api/projects/${projectId}/chapters/${chapterId}/zhuque-detect?force=${force ? 'true' : 'false'}`,
+      { method: 'POST' },
+    );
+  }
+
+  /** AI 换名候选（异步任务；result.candidates 不落库，挑选后走 updateProject title） */
+  suggestTitleAsync(projectId: number) {
+    return this.req<{ task_id: number }>(`/api/projects/${projectId}/title/suggest`, { method: 'POST' });
+  }
+
+  /** 一键连写弹窗篇幅规划提示（仅长篇；写满位置 vs 分篇规划的对照） */
+  autoWritePreview(projectId: number) {
+    return this.req<AutoWritePreview>(`/api/projects/${projectId}/auto-write/preview`);
+  }
+
   getSourceCanon(projectId: number) {
     return this.req<SourceCanonOptions>(`/api/projects/${projectId}/source-canon`);
   }
@@ -1931,7 +2047,7 @@ export class Api {
         cover_tone: o.tone || 'auto',
         cover_ratio: o.ratio || '',
         cover_composition_hint: o.compositionHint || '',
-        deep: o.deep ?? false,
+        deep: o.deep ?? true,
       }),
     });
   }

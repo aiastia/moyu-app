@@ -5,7 +5,7 @@ import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-nati
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { FieldLabel, Input, ScreenHeader, SelectField, useToast } from '@/components/ui';
-import type { WritingStyleItem } from '@/lib/api';
+import type { ZhuqueConfig, WritingStyleItem } from '@/lib/api';
 import { friendlyError, useAuth } from '@/lib/auth';
 import { NARRATIVE_POV_OPTIONS } from '@/lib/platforms';
 import { C, R, SP } from '@/lib/theme';
@@ -41,6 +41,11 @@ export default function PreferencesScreen() {
   const defaultStyleId = styles.find((s) => s.is_default)?.id;
   const defaultStyleName = styles.find((s) => s.id === defaultStyleId)?.name;
 
+  // 朱雀 AIGC 检测（用户自配腾讯 EdgeOne Makers Key，章节编辑页按章检测）
+  const [zhuque, setZhuque] = useState<ZhuqueConfig | null>(null);
+  const [zhuqueKey, setZhuqueKey] = useState('');
+  const [zhuqueBusy, setZhuqueBusy] = useState(false);
+
   useEffect(() => {
     if (!api) return;
     (async () => {
@@ -55,6 +60,7 @@ export default function PreferencesScreen() {
         const wan = Math.round((prefs.new_book_defaults?.target_word_count || 0) / 10000);
         setTargetWan(wan > 0 ? String(wan) : '');
         setStyles(Array.isArray(styleList) ? styleList : []);
+        api.getZhuqueConfig().then(setZhuque).catch(() => setZhuque({ api_key: '', configured: false }));
       } catch (e) {
         toast(friendlyError(e));
       } finally {
@@ -99,6 +105,44 @@ export default function PreferencesScreen() {
       toast('设置失败：' + friendlyError(e));
     } finally {
       setStyleSaving(false);
+    }
+  };
+
+  /** 保存朱雀 key 并实测；「•••••」=保留已存值，空串=清除 */
+  const saveZhuque = async () => {
+    if (!api || zhuqueBusy) return;
+    const key = zhuqueKey.trim();
+    if (!key) {
+      toast('先粘贴 EdgeOne Makers Key');
+      return;
+    }
+    setZhuqueBusy(true);
+    try {
+      await api.updateZhuqueConfig(key);
+      const test = await api.testZhuqueConfig();
+      const pct = test.report.human_ratio != null ? `，样文人工率 ${Math.round(test.report.human_ratio * 100)}%` : '';
+      setZhuqueKey('');
+      setZhuque(await api.getZhuqueConfig());
+      toast(`Key 已保存并验证可用${pct}`);
+    } catch (e) {
+      toast(friendlyError(e));
+    } finally {
+      setZhuqueBusy(false);
+    }
+  };
+
+  const clearZhuque = async () => {
+    if (!api || zhuqueBusy) return;
+    setZhuqueBusy(true);
+    try {
+      await api.updateZhuqueConfig('');
+      setZhuque({ api_key: '', configured: false });
+      setZhuqueKey('');
+      toast('已清除朱雀 Key');
+    } catch (e) {
+      toast(friendlyError(e));
+    } finally {
+      setZhuqueBusy(false);
     }
   };
 
@@ -162,6 +206,50 @@ export default function PreferencesScreen() {
                   maxLength={4}
                 />
                 <Hint>新建书时预填到向导（留空不预填），书内可随时改。</Hint>
+              </View>
+            </Card>
+
+            <Card title="朱雀 AI 检测">
+              <Hint>{zhuque?.configured ? '已配置 EdgeOne Makers Key，章节编辑页可逐章检测 AI 率。' : '自配腾讯 EdgeOne Makers Key 后，章节编辑页可逐章检测 AI 率（服务端代理，key 不下发）。'}</Hint>
+              <View style={{ gap: 7 }}>
+                <FieldLabel>EdgeOne Makers Key</FieldLabel>
+                <Input
+                  value={zhuqueKey}
+                  onChangeText={setZhuqueKey}
+                  placeholder={zhuque?.configured ? '已配置（粘贴新 Key 可替换）' : '粘贴腾讯 EdgeOne Makers API Key'}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  secureTextEntry
+                />
+              </View>
+              <View style={{ flexDirection: 'row', gap: 10 }}>
+                <Pressable
+                  onPress={saveZhuque}
+                  disabled={zhuqueBusy}
+                  style={({ pressed }) => ({
+                    flex: 1,
+                    height: 42,
+                    borderRadius: R.m,
+                    backgroundColor: pressed ? '#D9A844' : C.gold,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexDirection: 'row',
+                    gap: 7,
+                    opacity: zhuqueBusy ? 0.6 : 1,
+                  })}
+                >
+                  {zhuqueBusy ? <ActivityIndicator size="small" color="#1A1408" /> : <Ionicons name="checkmark" size={15} color="#1A1408" />}
+                  <Text style={{ color: '#1A1408', fontSize: 13.5, fontWeight: '800' }}>保存并测试</Text>
+                </Pressable>
+                {zhuque?.configured ? (
+                  <Pressable
+                    onPress={clearZhuque}
+                    disabled={zhuqueBusy}
+                    style={{ height: 42, paddingHorizontal: 16, borderRadius: R.m, backgroundColor: C.card, borderWidth: 1, borderColor: C.borderSoft, alignItems: 'center', justifyContent: 'center' }}
+                  >
+                    <Text style={{ color: C.text2, fontSize: 13.5, fontWeight: '600' }}>清除</Text>
+                  </Pressable>
+                ) : null}
               </View>
             </Card>
 

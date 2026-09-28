@@ -28,6 +28,18 @@ const QUALITIES = [
 
 const GALLERY_MAX = 5;
 
+/** 设计说明单行（值空则不渲染） */
+function NoteRow({ label, value }: { label: string; value?: string | null }) {
+  const text = (value ?? '').trim();
+  if (!text) return null;
+  return (
+    <Text style={{ color: C.text2, fontSize: 11.5, lineHeight: 17 }}>
+      <Text style={{ color: C.text3, fontWeight: '700' }}>{label}　</Text>
+      {text}
+    </Text>
+  );
+}
+
 /** 画廊角标：出自版本N / 已删除 / 外链 / 上传 / 已保留 */
 function galleryTag(entry: CoverGalleryEntry, prompts: CoverPromptItem[]): string {
   const pid = entry.prompt_id ?? '';
@@ -101,7 +113,8 @@ export function CoverSheet({ projectId, initialPrompt, onCoverChanged }: { proje
   const [palette, setPalette] = useState('auto');
   const [tone, setTone] = useState('auto');
   const [compHint, setCompHint] = useState('');
-  const [deep, setDeep] = useState(false);
+  // 深度取材（20260927 后端默认开启）：拉蓝图/近章大纲/主角人设提炼招牌画面素材
+  const [deep, setDeep] = useState(true);
   const [busy, setBusy] = useState(false);
   const [phase, setPhase] = useState('');
   const [toast, toastNode] = useToast();
@@ -109,6 +122,9 @@ export function CoverSheet({ projectId, initialPrompt, onCoverChanged }: { proje
   // 提示词列表（服务端 cover_prompts，末位=最新）与画廊；打开面板时拉一次项目详情
   const [promptItems, setPromptItems] = useState<CoverPromptItem[]>([]);
   const [selectedPromptId, setSelectedPromptId] = useState<string | null>(null);
+  // 选中条目的设计说明（两段式生成的第一段裁决产物，随条目落库外显）
+  const [notesOpen, setNotesOpen] = useState(false);
+  const selectedNotes = selectedPromptId ? (promptItems.find((p) => p.id === selectedPromptId)?.design_notes ?? null) : null;
   const [gallery, setGallery] = useState<CoverGalleryEntry[]>([]);
   // 本地文件条目才计 5 张上限（外链不占名额，与后端口径一致）
   const localGalleryCount = gallery.filter((e) => (e.image ?? '').startsWith('/data/covers/')).length;
@@ -486,7 +502,7 @@ export function CoverSheet({ projectId, initialPrompt, onCoverChanged }: { proje
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={{ color: C.text2, fontSize: 13 }}>深度取材（按剧情提炼招牌画面）</Text>
-                  <Text style={{ color: C.text3, fontSize: 11, marginTop: 2 }}>拉蓝图主线/近章大纲/主角人设注入生成，更贴合实况但更慢</Text>
+                  <Text style={{ color: C.text3, fontSize: 11, marginTop: 2 }}>默认开：拉蓝图主线/开篇大纲/主角人设注入生成，更贴合实况但更慢；批量草图可关</Text>
                 </View>
               </Pressable>
             </View>
@@ -501,12 +517,42 @@ export function CoverSheet({ projectId, initialPrompt, onCoverChanged }: { proje
                 const on = selectedPromptId === item.id;
                 const title = item.content.length > 12 ? `${item.content.slice(0, 12)}…` : item.content;
                 return (
-                  <Pressable key={item.id} onPress={() => { setSelectedPromptId(item.id); setPrompt(item.content); }} onLongPress={() => deletePromptItem(item)} delayLongPress={350}>
+                  <Pressable key={item.id} onPress={() => { setSelectedPromptId(item.id); setPrompt(item.content); setNotesOpen(false); }} onLongPress={() => deletePromptItem(item)} delayLongPress={350}>
                     <Chip label={item.rating ? `${title} ★${item.rating}` : title} fg={on ? C.gold : C.text2} bg={on ? C.goldSoft : C.card2} bold={on} />
                   </Pressable>
                 );
               })}
             </ScrollView>
+          </View>
+        ) : null}
+
+        {selectedNotes ? (
+          <View style={{ gap: 7 }}>
+            <Pressable onPress={() => setNotesOpen((v) => !v)} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 2 }}>
+              <Ionicons name={notesOpen ? 'chevron-down' : 'chevron-forward'} size={14} color={C.text3} />
+              <Text style={{ color: C.text3, fontSize: 12.5, fontWeight: '600' }}>设计说明</Text>
+              <Text style={{ color: C.text3, fontSize: 11.5 }}>生成该词时 AI 的画面裁决，改词前值得先看</Text>
+            </Pressable>
+            {notesOpen ? (
+              <View style={{ gap: 5, backgroundColor: C.card2, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10 }}>
+                <NoteRow label="钩子" value={selectedNotes.hook} />
+                <NoteRow label="主戏眼" value={selectedNotes.main_focus} />
+                {Array.isArray(selectedNotes.props) && selectedNotes.props.length ? (
+                  <Text style={{ color: C.text2, fontSize: 11.5, lineHeight: 17 }}>
+                    <Text style={{ color: C.text3, fontWeight: '700' }}>符号道具　</Text>
+                    {selectedNotes.props.map((p) => `${(p.name ?? '').trim()}${p.source ? `（${p.source}）` : ''}`).filter(Boolean).join('、')}
+                  </Text>
+                ) : null}
+                <NoteRow label="悬置瞬间" value={selectedNotes.frozen_moment} />
+                <NoteRow label="光源" value={selectedNotes.light} />
+                <NoteRow label="清晰符号" value={selectedNotes.clear_symbol} />
+                <NoteRow label="氛围对撞" value={selectedNotes.contrast} />
+                {Array.isArray(selectedNotes.background_symbols) && selectedNotes.background_symbols.length ? (
+                  <NoteRow label="背景象征" value={selectedNotes.background_symbols.join('、')} />
+                ) : null}
+                <NoteRow label="钩子唯一性" value={selectedNotes.hook_uniqueness} />
+              </View>
+            ) : null}
           </View>
         ) : null}
 

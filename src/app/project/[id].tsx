@@ -14,9 +14,10 @@ import { CoverSheet } from '@/components/CoverSheet';
 import { CoverArt } from '@/components/CoverArt';
 import { ShortReviewView } from '@/components/ShortReviewView';
 import { PendingEntitiesCard } from '@/components/PendingEntitiesCard';
-import type { ChapterRow, OutlineItem, ProjectDetail, ShortReview, StoryCard, WritingStyleItem } from '@/lib/api';
+import type { ChapterRow, OutlineItem, ProjectDetail, ShortReview, StoryCard, TitleSuggestResult, WritingStyleItem } from '@/lib/api';
 import { ApiError } from '@/lib/api';
 import { friendlyError, loadLastRead, useAuth } from '@/lib/auth';
+import { pollTask } from '@/lib/tasks';
 import { fmtDate, formatStoryTime, fmtPercent, fmtRelative, fmtWords, STORY_KIND_LABEL } from '@/lib/format';
 import { C, R, SP } from '@/lib/theme';
 
@@ -124,6 +125,10 @@ export default function ProjectScreen() {
   /** 概况 Tab：项目信息编辑表单（null=未打开） */
   const [aboutEdit, setAboutEdit] = useState<{ title: string; penName: string; genre: string; pov: string; platform: string; wordsWan: string; synopsis: string } | null>(null);
   const [aboutSaving, setAboutSaving] = useState(false);
+  // AI 换名候选（任务结果不落库；挑选后仍走保存按钮的 updateProject title）
+  const [titleCandidates, setTitleCandidates] = useState<{ title: string; reason?: string }[] | null>(null);
+  const [titleHints, setTitleHints] = useState<string[]>([]);
+  const [titleSuggestBusy, setTitleSuggestBusy] = useState(false);
   const [statusBusy, setStatusBusy] = useState(false);
   /** 概况 Tab：写作风格绑定弹窗 */
   const [styleSheet, setStyleSheet] = useState(false);
@@ -357,6 +362,27 @@ export default function ProjectScreen() {
       })
       .catch((e) => toast(friendlyError(e)))
       .finally(() => setAboutSaving(false));
+  };
+
+  /** 概况：AI 起名——基于书籍信息+开篇基调出 5 个候选，点选回填书名框 */
+  const suggestTitle = () => {
+    if (!api || titleSuggestBusy) return;
+    setTitleSuggestBusy(true);
+    setTitleCandidates(null);
+    setTitleHints([]);
+    api
+      .suggestTitleAsync(projectId)
+      .then((r) => pollTask(api, r.task_id))
+      .then((t) => {
+        const res = (t.result ?? {}) as TitleSuggestResult;
+        const list = (res.candidates ?? []).filter((c) => c?.title);
+        if (!list.length) throw new Error('AI 没有给出候选名，可再试一次');
+        setTitleCandidates(list);
+        setTitleHints(res.hints ?? []);
+        toast('已出 5 个候选名，点选填入书名');
+      })
+      .catch((e) => toast(friendlyError(e)))
+      .finally(() => setTitleSuggestBusy(false));
   };
 
   /** 概况：归档/恢复（归档后从书架主列表移到「已归档」） */
@@ -1270,8 +1296,38 @@ export default function ProjectScreen() {
         {aboutEdit ? (
           <>
             <View style={{ gap: 7 }}>
-              <FieldLabel>书名 *</FieldLabel>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <FieldLabel>书名 *</FieldLabel>
+                <View style={{ flex: 1 }} />
+                <Pressable onPress={suggestTitle} disabled={titleSuggestBusy} hitSlop={6} style={{ flexDirection: 'row', alignItems: 'center', gap: 4, opacity: titleSuggestBusy ? 0.6 : 1 }}>
+                  {titleSuggestBusy ? <ActivityIndicator size="small" color={C.gold} /> : <Ionicons name="sparkles-outline" size={13} color={C.gold} />}
+                  <Text style={{ color: C.gold, fontSize: 12, fontWeight: '700' }}>{titleSuggestBusy ? 'AI 起名中…' : 'AI 起名'}</Text>
+                </Pressable>
+              </View>
               <Input value={aboutEdit.title} onChangeText={(v) => setAboutEdit((f) => (f ? { ...f, title: v } : f))} placeholder="书名" />
+              {titleCandidates ? (
+                <View style={{ gap: 6 }}>
+                  {titleCandidates.map((c) => (
+                    <Pressable
+                      key={c.title}
+                      onPress={() => setAboutEdit((f) => (f ? { ...f, title: c.title } : f))}
+                      style={({ pressed }) => ({
+                        backgroundColor: aboutEdit.title === c.title ? C.goldSoft : pressed ? C.card2 : C.card,
+                        borderWidth: 1,
+                        borderColor: aboutEdit.title === c.title ? 'rgba(229,181,88,0.4)' : C.borderSoft,
+                        borderRadius: R.m,
+                        paddingHorizontal: 12,
+                        paddingVertical: 8,
+                        gap: 2,
+                      })}
+                    >
+                      <Text style={{ color: aboutEdit.title === c.title ? C.gold : C.text, fontSize: 13.5, fontWeight: '700' }}>{c.title}</Text>
+                      {c.reason ? <Text style={{ color: C.text3, fontSize: 11, lineHeight: 15 }}>{c.reason}</Text> : null}
+                    </Pressable>
+                  ))}
+                  {titleHints.length ? <Text style={{ color: C.text3, fontSize: 11, lineHeight: 16 }}>{titleHints.join('\n')}</Text> : null}
+                </View>
+              ) : null}
             </View>
             <View style={{ flexDirection: 'row', gap: 10 }}>
               <View style={{ flex: 1, gap: 7 }}>
